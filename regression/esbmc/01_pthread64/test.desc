@@ -1,0 +1,4 @@
+CORE
+main.c
+--context-bound 9
+^VERIFICATION FAILED$

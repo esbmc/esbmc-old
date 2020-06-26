@@ -251,6 +251,15 @@ void execution_statet::symex_step(reachability_treet &art)
       end_thread();
       force_cswitch();
     }
+    // if the main thread has ended; then we call end_thread.
+    // if we are verifying deadlock, then we want to allow ESBMC to
+    // check when some of the threads form a waiting cycle.
+    else if(instruction.function == "c:@F@main" && !art.deadlock_check)
+    {
+      end_thread();
+      // No need to force a context switch;
+      // an ended thread will cause the run to end
+    }
     else
     {
       // Fall through to base class
@@ -1008,6 +1017,15 @@ void execution_statet::calculate_mpor_constraints()
       can_run = false;
       break;
     }
+  }
+
+  // Search for a dependancy chain between active thread and main thread
+  if(!can_run)
+  {
+    if(
+      thread_last_reads[0] == thread_last_writes[active_thread] ||
+      thread_last_reads[active_thread] == thread_last_writes[0])
+      can_run = true;
   }
 
   mpor_says_no = !can_run;

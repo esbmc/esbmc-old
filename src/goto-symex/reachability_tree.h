@@ -336,6 +336,8 @@ public:
   const namespacet &ns;
   /** Options that are enabled */
   optionst &options;
+  /* Have we enabled the deadlock-check?*/
+  bool deadlock_check;
 
 protected:
   /** Stack of execution states representing current interleaving.

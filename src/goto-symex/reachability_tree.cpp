@@ -51,6 +51,7 @@ reachability_treet::reachability_treet(
   interactive_ileaves = options.get_bool_option("interactive-ileaves");
   round_robin = options.get_bool_option("round-robin");
   schedule = options.get_bool_option("schedule");
+  deadlock_check = options.get_bool_option("deadlock-check");
 
   if(options.get_bool_option("no-por"))
     por = false;
