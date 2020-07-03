@@ -377,6 +377,9 @@ int esbmc_parseoptionst::doit()
     return 0;
   }
 
+  if(cmdline.isset("incremental-cb"))
+    return doit_incremental_cb();
+
   if(cmdline.isset("termination"))
     return doit_termination();
 
@@ -1114,6 +1117,61 @@ int esbmc_parseoptionst::doit_incremental()
   return 0;
 }
 
+int esbmc_parseoptionst::doit_incremental_cb()
+{
+  optionst opts;
+  get_command_line_options(opts);
+
+  if(get_goto_program(opts, goto_functions))
+    return 6;
+
+  if(cmdline.isset("show-claims"))
+  {
+    const namespacet ns(context);
+    show_claims(ns, get_ui(), goto_functions);
+    return 0;
+  }
+
+  if(set_claims(goto_functions))
+    return 7;
+
+  // Get max number of context bounds
+  unsigned int max_context_bound =
+    cmdline.isset("unlimited-context-bound")
+      ? UINT_MAX
+      : strtoul(cmdline.getval("max-context-bound"), nullptr, 10);
+
+  // Get the context bound increment
+  unsigned int context_bound_inc =
+    strtoul(cmdline.getval("context-bound-step"), nullptr, 10);
+
+  // Get the unwind bound
+  unsigned unwind = atoi(opts.get_option("unwind").c_str());
+
+  for(unsigned int context_bound = 2; context_bound <= max_context_bound;
+      context_bound += context_bound_inc)
+  {
+    char str[5];
+    snprintf(str, sizeof(str), "%d", context_bound);
+    opts.set_option("context-bound", str);
+    std::cout << "\n*** Context bound number ";
+    std::cout << context_bound;
+    std::cout << " ***\n";
+
+    if(do_base_case(opts, goto_functions, unwind))
+      return true;
+    else if(
+      !do_forward_condition(opts, goto_functions, unwind) &&
+      context_bound == (max_context_bound - context_bound_inc + 2))
+      return false;
+  }
+
+  status("Unable to prove or falsify the program, giving up.");
+  status("VERIFICATION UNKNOWN");
+
+  return 0;
+}
+
 int esbmc_parseoptionst::doit_termination()
 {
   optionst opts;
@@ -1666,7 +1724,8 @@ void esbmc_parseoptionst::help()
        "location\n"
        " --ssa-no-sliced              do not print the sliced SSAs\n"
        " --ssa-full-names             print SSAs with full variable names\n"
-       " --smt-formula-only           only show SMT formula (not supported by "
+       " --smt-formula-only           only show SMT formula (not supported "
+       "by "
        "all solvers)\n"
        " --smt-formula-too            show SMT formula (not supported by all "
        "solvers) and verify\n"
@@ -1681,10 +1740,12 @@ void esbmc_parseoptionst::help()
        " --symex-ssa-trace            print generated SSA during symbolic "
        "execution\n"
        " --ssa-trace                  print SSA during SMT encoding\n"
-       " --ssa-smt-trace              print generated SMT during SMT encoding\n"
+       " --ssa-smt-trace              print generated SMT during SMT "
+       "encoding\n"
        " --show-goto-value-sets       show value-set analysis for the goto "
        "functions\n"
-       " --show-symex-value-sets      show value-set analysis during symbolic "
+       " --show-symex-value-sets      show value-set analysis during "
+       "symbolic "
        "execution\n"
 
        "\nFront-end options\n"
@@ -1692,7 +1753,8 @@ void esbmc_parseoptionst::help()
        " -D macro                     define preprocessor macro\n"
        " --preprocess                 stop after preprocessing\n"
        " --no-inlining                disable inlining function calls\n"
-       " --full-inlining              perform full inlining of function calls\n"
+       " --full-inlining              perform full inlining of function "
+       "calls\n"
        " --all-claims                 keep all claims\n"
        " --show-loops                 show the loops in the program\n"
        " --show-claims                only show claims\n"
@@ -1704,11 +1766,13 @@ void esbmc_parseoptionst::help()
        "code\n"
        " --little-endian              allow little-endian word-byte "
        "conversions\n"
-       " --big-endian                 allow big-endian word-byte conversions\n"
+       " --big-endian                 allow big-endian word-byte "
+       "conversions\n"
        " --16, --32, --64             set width of machine word (default is "
        "64)\n"
        " --version                    show current ESBMC version and exit\n"
-       " --witness-output filename    generate the verification result witness "
+       " --witness-output filename    generate the verification result "
+       "witness "
        "in GraphML format\n"
        " --old-frontend               parse source files using our old "
        "frontend (deprecated)\n"
@@ -1717,7 +1781,8 @@ void esbmc_parseoptionst::help()
        " --i386-macos                 set MACOS/I386 architecture\n"
        " --ppc-macos                  set PPC/I386 architecture\n"
        " --i386-linux                 set Linux/I386 architecture\n"
-       " --i386-win32                 set Windows/I386 architecture (default)\n"
+       " --i386-win32                 set Windows/I386 architecture "
+       "(default)\n"
 #elif __APPLE__
        " --i386-macos                 set MACOS/I386 architecture (default)\n"
        " --ppc-macos                  set PPC/I386 architecture\n"
@@ -1747,13 +1812,16 @@ void esbmc_parseoptionst::help()
        "\nIncremental BMC\n"
        " --falsification              incremental loop unwinding for bug "
        "searching\n"
-       " --incremental-bmc            incremental loop unwinding verification\n"
+       " --incremental-bmc            incremental loop unwinding "
+       "verification\n"
        " --termination                incremental loop unwinding assertion "
        "verification\n"
        " --k-step nr                  set k increment (default is 1)\n"
-       " --max-k-step nr              set max number of iteration (default is "
+       " --max-k-step nr              set max number of iteration (default "
+       "is "
        "50)\n"
-       " --unlimited-k-steps          set max number of iteration to UINT_MAX\n"
+       " --unlimited-k-steps          set max number of iteration to "
+       "UINT_MAX\n"
 
        "\nSolver configuration\n"
        " --list-solvers               list available solvers and exit\n"
@@ -1763,7 +1831,8 @@ void esbmc_parseoptionst::help()
        " --cvc                        use CVC4\n"
        " --yices                      use Yices\n"
        " --bv                         use solver with bit-vector arithmetic\n"
-       " --ir                         use solver with integer/real arithmetic\n"
+       " --ir                         use solver with integer/real "
+       "arithmetic\n"
        " --smtlib                     use SMT lib format\n"
        " --smtlib-solver-prog         SMT lib program name\n"
        " --output <filename>          output VCCs in SMT lib format to given "
@@ -1779,7 +1848,8 @@ void esbmc_parseoptionst::help()
        "                              SMT floating-point theory)\n"
        "--tuple-node-flattener        encode tuples using our tuple to node "
        "API\n"
-       "--tuple-sym-flattener         encode tuples using our tuple to symbol "
+       "--tuple-sym-flattener         encode tuples using our tuple to "
+       "symbol "
        "API\n"
        "--array-flattener             encode arrays using our array API\n"
        "--no-return-value-opt         disable return value optimization to "
@@ -1819,24 +1889,30 @@ void esbmc_parseoptionst::help()
        " --forward-condition          check the forward condition\n"
        " --inductive-step             check the inductive step\n"
        " --k-induction                prove by k-induction \n"
-       " --k-induction-parallel       prove by k-induction, running each step "
+       " --k-induction-parallel       prove by k-induction, running each "
+       "step "
        "on a separate\n"
        "                              process\n"
        " --k-step nr                  set k increment (default is 1)\n"
-       " --max-k-step nr              set max number of iteration (default is "
+       " --max-k-step nr              set max number of iteration (default "
+       "is "
        "50)\n"
-       " --unlimited-k-steps          set max number of iteration to UINT_MAX\n"
+       " --unlimited-k-steps          set max number of iteration to "
+       "UINT_MAX\n"
        " --show-cex                   print the counter-example produced by "
        "the inductive step\n"
 
        "\nScheduling approaches\n"
        " --schedule                   use schedule recording approach \n"
-       " --round-robin                use the round robin scheduling approach\n"
+       " --round-robin                use the round robin scheduling "
+       "approach\n"
        " --time-slice nr              set the time slice of the round robin "
        "algorithm\n"
        "                              (default is 1) \n"
 
        "\nConcurrency checking\n"
+       " --incremental-cb             incremental context-bound "
+       "verification\n"
        " --context-bound nr           limit number of context switches for "
        "each thread \n"
        " --state-hashing              enable state-hashing, prunes duplicate "
@@ -1844,9 +1920,18 @@ void esbmc_parseoptionst::help()
        " --no-por                     do not do partial order reduction\n"
        " --all-runs                   check all interleavings, even if a bug "
        "was already found\n"
+       " --context-bound-step nr      set k context bound increment (default "
+       "is 5)\n"
+       " --max-context-bound nr       set max number of context-bound "
+       "(default "
+       "is "
+       "15)\n"
+       " --unlimited-context-bound    set max number of context bounds to "
+       "UINT_MAX\n"
 
        "\nMiscellaneous options\n"
-       " --memlimit                   configure memory limit, of form \"100m\" "
+       " --memlimit                   configure memory limit, of form "
+       "\"100m\" "
        "or \"2g\"\n"
        " --timeout                    configure time limit, integer followed "
        "by {s,m,h}\n"
@@ -1854,7 +1939,8 @@ void esbmc_parseoptionst::help()
        " --no-simplify                do not simplify any expression\n"
        " --no-propagation             disable constant propagation\n"
        " --enable-core-dump           do not disable core dump output\n"
-       " --interval-analysis          enable interval analysis and add assumes "
+       " --interval-analysis          enable interval analysis and add "
+       "assumes "
        "to the program\n"
        "\n";
 }

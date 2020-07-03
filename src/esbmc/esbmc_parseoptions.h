@@ -45,6 +45,7 @@ protected:
 
   int doit_falsification();
   int doit_incremental();
+  int doit_incremental_cb();
   int doit_termination();
 
   int do_base_case(
