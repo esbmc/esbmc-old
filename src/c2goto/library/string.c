@@ -26,9 +26,14 @@
 char *strcpy(char *dst, const char *src)
 {
 __ESBMC_HIDE:;
-  char *cp = dst;
-  while((*cp++ = *src++))
-    ;
+  size_t i = 0;
+  char ch;
+  do
+  {
+    ch = src[i];
+    dst[i] = ch;
+    i++;
+  } while(ch != (char)0);
   return dst;
 }
 
