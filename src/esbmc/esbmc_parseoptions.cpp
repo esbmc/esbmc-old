@@ -71,7 +71,7 @@ enum PROCESS_TYPE
 struct resultt
 {
   PROCESS_TYPE type;
-  BigInt k;
+  uint64_t k;
 };
 
 #ifndef _WIN32
@@ -424,6 +424,13 @@ int esbmc_parseoptionst::doit()
     return 0;
   }
 
+#if 0
+  if(cmdline.isset("k-induction-parallel"))
+    return doit_k_induction_parallel();
+#endif
+  // forcing changes in git again
+  return doit_k_induction_parallel();
+
   if(cmdline.isset("termination"))
     return doit_termination();
 
@@ -435,9 +442,6 @@ int esbmc_parseoptionst::doit()
 
   if(cmdline.isset("k-induction"))
     return doit_k_induction();
-
-  if(cmdline.isset("k-induction-parallel"))
-    return doit_k_induction_parallel();
 
   optionst opts;
   get_command_line_options(opts);
@@ -688,19 +692,21 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
       // If the either the forward condition or inductive step finds a
       // solution, first check if base case couldn't find a bug in that code,
       // if there is no bug, inductive step can present the result
-
       if(fc_finished && (fc_solution != 0) && (fc_solution != max_k_step))
       {
         // If base case finished, then we can present the result
         if(bc_finished)
           break;
 
-        // Otherwise, ask base case for a solution
+        // Otherwise, kill the inductive step process
+        kill(children_pid[2], SIGKILL);
+
+        // And ask base case for a solution
 
         // Struct to keep the result
         struct resultt r = {process_type, 0};
 
-        r.k = fc_solution;
+        r.k = fc_solution.to_uint64();
 
         // Write result
         auto const len = write(backward_pipe[1], &r, sizeof(r));
@@ -714,12 +720,15 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
         if(bc_finished)
           break;
 
-        // Otherwise, ask base case for a solution
+        // Otherwise, kill the forward condition process
+        kill(children_pid[1], SIGKILL);
+
+        // And ask base case for a solution
 
         // Struct to keep the result
         struct resultt r = {process_type, 0};
 
-        r.k = is_solution;
+        r.k = is_solution.to_uint64();
 
         // Write result
         auto const len = write(backward_pipe[1], &r, sizeof(r));
@@ -785,6 +794,9 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
     opts.set_option("forward-condition", false);
     opts.set_option("inductive-step", false);
 
+    opts.set_option("no-unwinding-assertions", true);
+    opts.set_option("partial-loops", false);
+
     // Start communication to the parent process
     close(forward_pipe[0]);
     close(backward_pipe[1]);
@@ -821,7 +833,7 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
       // Send information to parent if no bug was found
       if(res == smt_convt::P_SATISFIABLE)
       {
-        r.k = k_step;
+        r.k = k_step.to_uint64();
 
         // Write result
         auto const len = write(forward_pipe[1], &r, sizeof(r));
@@ -867,12 +879,11 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
       // If the value being asked is greater or equal the current step,
       // then we can stop the base case. It can be equal, because we
       // have just checked the current value of k
-
-      if(a_result.k >= k_step)
+      if(a_result.k < k_step)
         break;
 
       // Otherwise, we just need to check the base case for k = a_result.k
-      k_step = max_k_step = a_result.k;
+      max_k_step = a_result.k + k_step_inc;
     }
 
     // Send information to parent that a bug was not found
@@ -893,6 +904,10 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
     opts.set_option("forward-condition", true);
     opts.set_option("inductive-step", false);
 
+    opts.set_option("no-unwinding-assertions", false);
+    opts.set_option("partial-loops", false);
+    opts.set_option("no-assertions", true);
+
     // Start communication to the parent process
     close(forward_pipe[0]);
     close(backward_pipe[1]);
@@ -905,9 +920,6 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
     // 2. It couldn't find a proof
     for(BigInt k_step = 2; k_step <= max_k_step; k_step += k_step_inc)
     {
-      if(opts.get_bool_option("disable-forward-condition"))
-        break;
-
       bmct bmc(goto_functions, opts, context, ui_message_handler);
       set_verbosity_msg(bmc);
 
@@ -929,10 +941,13 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
         break;
       }
 
+      if(opts.get_bool_option("disable-forward-condition"))
+        break;
+
       // Send information to parent if no bug was found
       if(res == smt_convt::P_UNSATISFIABLE)
       {
-        r.k = k_step;
+        r.k = k_step.to_uint64();
 
         // Write result
         auto const len = write(forward_pipe[1], &r, sizeof(r));
@@ -962,6 +977,9 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
     opts.set_option("base-case", false);
     opts.set_option("forward-condition", false);
     opts.set_option("inductive-step", true);
+
+    opts.set_option("no-unwinding-assertions", true);
+    opts.set_option("partial-loops", true);
 
     // Start communication to the parent process
     close(forward_pipe[0]);
@@ -996,10 +1014,13 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
         break;
       }
 
+      if(opts.get_bool_option("disable-inductive-step"))
+        break;
+
       // Send information to parent if no bug was found
       if(res == smt_convt::P_UNSATISFIABLE)
       {
-        r.k = k_step;
+        r.k = k_step.to_uint64();
 
         // Write result
         auto const len = write(forward_pipe[1], &r, sizeof(r));

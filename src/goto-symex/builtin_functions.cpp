@@ -536,7 +536,9 @@ void goto_symext::intrinsic_spawn_thread(
   const code_function_call2t &call,
   reachability_treet &art)
 {
-  if(k_induction && !options.get_bool_option("disable-inductive-step"))
+  if(
+    (k_induction || inductive_step) &&
+    !options.get_bool_option("disable-inductive-step"))
   {
     std::cout << "**** WARNING: k-induction does not support concurrency yet. "
               << "Disabling inductive step\n";

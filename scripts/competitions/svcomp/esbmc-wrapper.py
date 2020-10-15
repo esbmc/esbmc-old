@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 import argparse
@@ -63,18 +63,25 @@ class Property:
 
 # Function to run esbmc
 def run(cmd_line):
-  print "Verifying with ESBMC"
-  print "Command: " + cmd_line
+  print("Verifying with ESBMC")
+  print("Command: " + cmd_line)
 
   the_args = shlex.split(cmd_line)
 
-  p = subprocess.Popen(the_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-  (stdout, stderr) = p.communicate()
+  p = subprocess.Popen(the_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
 
-  print stdout
-  print stderr
+  stdout = []
 
-  return stdout
+  while True:
+    output = p.stdout.readline()
+    if output == '' and p.poll() is not None:
+      break
+    if output:
+      print(output.strip())
+      stdout.append(output.strip())
+    rc = p.poll()
+
+  return "\n".join(stdout)
 
 def parse_result(the_output, prop):
 
@@ -230,15 +237,15 @@ def get_command_line(strat, prop, arch, benchmark, fp_mode):
 
   # Add strategy
   if strat == "fixed":
-    command_line += "--k-induction --max-inductive-step 3 "
+    command_line += "--k-induction-parallel --max-inductive-step 3 "
   elif strat == "kinduction":
-    command_line += "--k-induction --max-inductive-step 3 "
+    command_line += "--k-induction-parallel --max-inductive-step 3 "
   elif strat == "falsi":
     command_line += "--falsification "
   elif strat == "incr":
     command_line += "--incremental-bmc "
   else:
-    print "Unknown strategy"
+    print("Unknown strategy")
     exit(1)
 
   if prop == Property.overflow:
@@ -250,7 +257,7 @@ def get_command_line(strat, prop, arch, benchmark, fp_mode):
   elif prop == Property.reach:
     command_line += "--no-pointer-check --no-bounds-check --interval-analysis "
   else:
-    print "Unknown property"
+    print("Unknown property")
     exit(1)
 
   # if we're running in FP mode, use MathSAT
@@ -290,15 +297,15 @@ benchmark = args.benchmark
 strategy = args.strategy
 
 if version:
-  print os.popen(esbmc_path + "--version").read()[6:],
+  print(os.popen(esbmc_path + "--version").read()[6:],)
   exit(0)
 
 if property_file is None:
-  print "Please, specify a property file"
+  print("Please, specify a property file")
   exit(1)
 
 if benchmark is None:
-  print "Please, specify a benchmark to verify"
+  print("Please, specify a benchmark to verify")
   exit(1)
 
 # Parse property files
@@ -315,8 +322,8 @@ elif "CHECK( init(main()), LTL(G ! call(__VERIFIER_error())) )" in property_file
 elif "CHECK( init(main()), LTL(F end) )" in property_file_content:
   category_property = Property.termination
 else:
-  print "Unsupported Property"
+  print("Unsupported Property")
   exit(1)
 
 result = verify(strategy, category_property, False)
-print get_result_string(result)
+print(get_result_string(result))
