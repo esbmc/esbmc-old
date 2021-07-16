@@ -1,0 +1,4 @@
+CORE
+main.c
+--parallel --z3
+^VERIFICATION FAILED$

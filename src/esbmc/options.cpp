@@ -142,6 +142,7 @@ const struct group_opt_templ all_cmd_options[] = {
     {"bitwuzla", NULL, "use Bitwuzla"},
     {"bv", NULL, "use solver with bit-vector arithmetic"},
     {"ir", NULL, "use solver with integer/real arithmetic"},
+    {"parallel", NULL, "use parallel SMT solving (Z3 only)"},
     {"smtlib", NULL, "use SMT lib format"},
     {"smtlib-solver-prog",
 

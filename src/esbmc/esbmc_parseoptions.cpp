@@ -214,6 +214,13 @@ void esbmc_parseoptionst::get_command_line_options(optionst &options)
     exit(0);
   }
 
+  if(cmdline.isset("parallel") && !cmdline.isset("z3"))
+  {
+    std::cerr << "The chosen SMT solver does not support parallel solving yet"
+              << std::endl;
+    abort();
+  }
+
   if(cmdline.isset("bv"))
   {
     options.set_option("int-encoding", false);
