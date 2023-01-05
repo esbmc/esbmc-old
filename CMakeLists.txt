@@ -1,7 +1,7 @@
 #################################
 # Project Information           #
 #################################
-cmake_minimum_required (VERSION 3.7)
+cmake_minimum_required (VERSION 3.9)
 project (ESBMC)
 
 set (ESBMC_VERSION_MAJOR 7)
@@ -89,6 +89,8 @@ include(FindLocalLLVM)
 
 # Optimization
 include(OptimizationCCache)
+# Enable LTO
+include(LtoOptimization)
 include(WError)
 
 if(ENABLE_OLD_FRONTEND)
@@ -108,6 +110,7 @@ endif()
 
 add_subdirectory(src)
 
+# Precompile irep2 headers
 include(Irep2Optimization)
 
 # Generate ac_config.h. This must be generated after solvers
