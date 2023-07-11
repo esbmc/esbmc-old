@@ -250,6 +250,9 @@ inline const type2tc &get_base_array_subtype(const type2tc &type)
 
 inline bool simplify(expr2tc &expr)
 {
+  if(is_nil_expr)
+    return false;
+
   expr2tc tmp = expr->simplify();
   if(!is_nil_expr(tmp))
   {
