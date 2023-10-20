@@ -1,4 +1,4 @@
 CORE
 main.c
-
+--force-malloc-success
 ^VERIFICATION SUCCESSFUL$

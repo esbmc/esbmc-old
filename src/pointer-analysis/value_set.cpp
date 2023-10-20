@@ -573,12 +573,34 @@ void value_sett::get_value_set_rec(
     // Find out what the pointer operand points at, and suck that data into
     // new object maps.
     object_mapt op0_set;
-    if(!is_pointer_type(op1))
-      get_value_set_rec(op0, op0_set, "", op0->type, false);
-
     object_mapt op1_set;
-    if(!is_pointer_type(op0))
-      get_value_set_rec(op1, op1_set, "", op1->type, false);
+    get_value_set_rec(op0, op0_set, "", (op0)->type, false);
+    get_value_set_rec(op1, op1_set, "", (op1)->type, false);
+
+    /*
+     * The main idea here is to detect if any address might be valid at all. If any side
+     * of the pointer arithmetic is not a valid object, we can assume that it is not the
+     * pointer operand.
+     *
+     * As of now, there is one KNOWNBUG (esbmc/github_695_2_true), which is triggered by
+     * a cast of the index as char ptr. This makes ESBMC think that both operands are
+     * valid, which is currently unsupported.
+     */
+    auto op_contains_valid_address = [this](value_sett::object_mapt o) -> bool {
+      for(const auto &it : o)
+      {
+        auto expr = object_numbering[it.first];
+        if(is_symbol2t(expr) || is_constant_string2t(expr))
+          return true;
+      }
+
+      return false;
+    };
+
+    if(!op_contains_valid_address(op0_set))
+      op0_set.clear();
+    if(!op_contains_valid_address(op1_set))
+      op1_set.clear();
 
     /* TODO: The case that both, op0_set and op1_set, are non-empty is not
      *       handled, yet. */
