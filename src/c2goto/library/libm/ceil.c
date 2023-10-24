@@ -1,32 +1,31 @@
-#define __CRT__NO_INLINE /* Don't let mingw insert code */
+#include "libm.h"
 
-#ifdef _MSVC
-#define _USE_MATH_DEFINES
-#define _CRT_FUNCTIONS_REQUIRED 0
+#if FLT_EVAL_METHOD==0 || FLT_EVAL_METHOD==1
+#define EPS DBL_EPSILON
+#elif FLT_EVAL_METHOD==2
+#define EPS LDBL_EPSILON
 #endif
-#include <math.h>
-#include <fenv.h>
+static const double_t toint = 1/EPS;
 
-#define ceil_def(type, name, rint_func)                                        \
-  type name(type f)                                                            \
-  {                                                                            \
-  __ESBMC_HIDE:;                                                               \
-    type result;                                                               \
-    int save_round = fegetround();                                             \
-    fesetround(FE_UPWARD);                                                     \
-    result = rint_func(f);                                                     \
-    fesetround(save_round);                                                    \
-    return result;                                                             \
-  }                                                                            \
-                                                                               \
-  type __##name(type f)                                                        \
-  {                                                                            \
-  __ESBMC_HIDE:;                                                               \
-    return name(f);                                                            \
-  }
+double ceil(double x)
+{
+	union {double f; uint64_t i;} u = {x};
+	int e = u.i >> 52 & 0x7ff;
+	double_t y;
 
-ceil_def(float, ceilf, rintf);
-ceil_def(double, ceil, rint);
-ceil_def(long double, ceill, rintl);
-
-#undef ceil_def
+	if (e >= 0x3ff+52 || x == 0)
+		return x;
+	/* y = int(x) - x, where int(x) is an integer neighbor of x */
+	if (u.i >> 63)
+		y = x - toint + toint - x;
+	else
+		y = x + toint - toint - x;
+	/* special case because of non-nearest rounding modes */
+	if (e <= 0x3ff-1) {
+		FORCE_EVAL(y);
+		return u.i >> 63 ? -0.0 : 1;
+	}
+	if (y < 0)
+		return x + y + 1;
+	return x + y;
+}

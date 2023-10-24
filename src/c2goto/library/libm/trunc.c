@@ -1,28 +1,19 @@
-#define __CRT__NO_INLINE /* Don't let mingw insert code */
+#include "libm.h"
 
-#include <math.h>
-#include <fenv.h>
+double trunc(double x)
+{
+	union {double f; uint64_t i;} u = {x};
+	int e = (int)(u.i >> 52 & 0x7ff) - 0x3ff + 12;
+	uint64_t m;
 
-#define trunc_def(type, name, rint_func)                                       \
-  type name(type f)                                                            \
-  {                                                                            \
-  __ESBMC_HIDE:;                                                               \
-    type result;                                                               \
-    int save_round = fegetround();                                             \
-    fesetround(FE_TOWARDZERO);                                                 \
-    result = rint_func(f);                                                     \
-    fesetround(save_round);                                                    \
-    return result;                                                             \
-  }                                                                            \
-                                                                               \
-  type __##name(type f)                                                        \
-  {                                                                            \
-  __ESBMC_HIDE:;                                                               \
-    return name(f);                                                            \
-  }
-
-trunc_def(float, truncf, rintf);
-trunc_def(double, trunc, rint);
-trunc_def(long double, truncl, rintl);
-
-#undef trunc_def
+	if (e >= 52 + 12)
+		return x;
+	if (e < 12)
+		e = 1;
+	m = -1ULL >> e;
+	if ((u.i & m) == 0)
+		return x;
+	FORCE_EVAL(x + 0x1p120f);
+	u.i &= ~m;
+	return u.f;
+}

@@ -1,31 +1,34 @@
-#define __CRT__NO_INLINE /* Don't let mingw insert code */
+#include "libm.h"
 
-#ifdef _MSVC
-#define _USE_MATH_DEFINES
-#define _CRT_FUNCTIONS_REQUIRED 0
-#endif
-#include <fenv.h>
-#include <math.h>
+double modf(double x, double *iptr)
+{
+	union {double f; uint64_t i;} u = {x};
+	uint64_t mask;
+	int e = (int)(u.i>>52 & 0x7ff) - 0x3ff;
 
-#define modff_def(type, name, nearbyint_func, copysign_func, isinf_func)       \
-  type name(type value, type *iptr)                                            \
-  {                                                                            \
-  __ESBMC_HIDE:;                                                               \
-    int save_round = fegetround();                                             \
-    fesetround(FE_TOWARDZERO);                                                 \
-    *iptr = nearbyint_func(value);                                             \
-    fesetround(save_round);                                                    \
-    return copysign_func(isinf_func(value) ? 0.0 : value - (*iptr), value);    \
-  }                                                                            \
-                                                                               \
-  type __##name(type value, type *iptr)                                        \
-  {                                                                            \
-  __ESBMC_HIDE:;                                                               \
-    return name(value, iptr);                                                  \
-  }
+	/* no fractional part */
+	if (e >= 52) {
+		*iptr = x;
+		if (e == 0x400 && u.i<<12 != 0) /* nan */
+			return x;
+		u.i &= 1ULL<<63;
+		return u.f;
+	}
 
-modff_def(float, modff, nearbyintf, copysignf, isinf);
-modff_def(double, modf, nearbyint, copysign, isinf);
-modff_def(long double, modfl, nearbyintl, copysignl, isinf);
+	/* no integral part*/
+	if (e < 0) {
+		u.i &= 1ULL<<63;
+		*iptr = u.f;
+		return x;
+	}
 
-#undef modff_def
+	mask = -1ULL>>12>>e;
+	if ((u.i & mask) == 0) {
+		*iptr = x;
+		u.i &= 1ULL<<63;
+		return u.f;
+	}
+	u.i &= ~mask;
+	*iptr = u.f;
+	return x - u.f;
+}

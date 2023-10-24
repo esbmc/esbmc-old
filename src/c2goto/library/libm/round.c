@@ -1,36 +1,35 @@
-#define __CRT__NO_INLINE /* Don't let mingw insert code */
+#include "libm.h"
 
-#include <math.h>
-#include <fenv.h>
+#if FLT_EVAL_METHOD==0 || FLT_EVAL_METHOD==1
+#define EPS DBL_EPSILON
+#elif FLT_EVAL_METHOD==2
+#define EPS LDBL_EPSILON
+#endif
+static const double_t toint = 1/EPS;
 
-#define round_def(ret_type, type, name, rint_func, copysign_func, abs_func)    \
-  ret_type name(type f)                                                        \
-  {                                                                            \
-  __ESBMC_HIDE:;                                                               \
-    type result;                                                               \
-    int save_round = fegetround();                                             \
-    fesetround(FE_TOWARDZERO);                                                 \
-    result = rint_func(copysign_func(0.5 + abs_func(f), f));                   \
-    fesetround(save_round);                                                    \
-    return result;                                                             \
-  }                                                                            \
-                                                                               \
-  ret_type __##name(type f)                                                    \
-  {                                                                            \
-  __ESBMC_HIDE:;                                                               \
-    return name(f);                                                            \
-  }
+double round(double x)
+{
+	union {double f; uint64_t i;} u = {x};
+	int e = u.i >> 52 & 0x7ff;
+	double_t y;
 
-round_def(float, float, roundf, rintf, copysignf, fabsf);
-round_def(double, double, round, rint, copysign, fabs);
-round_def(long double, long double, roundl, rintl, copysignl, fabsl);
-
-round_def(long, float, lroundf, rintf, copysignf, fabsf);
-round_def(long, double, lround, rint, copysign, fabs);
-round_def(long, long double, lroundl, rintl, copysignl, fabsl);
-
-round_def(long long, float, llroundf, rintf, copysignf, fabsf);
-round_def(long long, double, llround, rint, copysign, fabs);
-round_def(long long, long double, llroundl, rintl, copysignl, fabsl);
-
-#undef round_def
+	if (e >= 0x3ff+52)
+		return x;
+	if (u.i >> 63)
+		x = -x;
+	if (e < 0x3ff-1) {
+		/* raise inexact if x!=0 */
+		FORCE_EVAL(x + toint);
+		return 0*u.f;
+	}
+	y = x + toint - toint - x;
+	if (y > 0.5)
+		y = y + x - 1;
+	else if (y <= -0.5)
+		y = y + x + 1;
+	else
+		y = y + x;
+	if (u.i >> 63)
+		y = -y;
+	return y;
+}

@@ -1,61 +1,31 @@
-#include <stdint.h>
-#include <fenv.h>
-#include <math.h>
-#include <errno.h>
+#include "libm.h"
 
-#undef errno
-extern _Thread_local int errno;
+double nextafter(double x, double y)
+{
+	union {double f; uint64_t i;} ux={x}, uy={y};
+	uint64_t ax, ay;
+	int e;
 
-#define NEXTAFTER(suff, dbl, ui)                                               \
-  dbl nextafter##suff(dbl x, dbl y)                                            \
-  {                                                                            \
-    if(isnan(y))                                                               \
-      return y;                                                                \
-    union                                                                      \
-    {                                                                          \
-      dbl d;                                                                   \
-      ui u;                                                                    \
-    } v;                                                                       \
-    v.d = x;                                                                   \
-    int dir = isless(x, y) ? +1 : isgreater(x, y) ? -1 : 0;                    \
-    if(signbit(x))                                                             \
-      dir = -dir;                                                              \
-    switch(fpclassify(x))                                                      \
-    {                                                                          \
-    case FP_NAN:                                                               \
-      break;                                                                   \
-    case FP_ZERO:                                                              \
-      if(!dir)                                                                 \
-        return y;                                                              \
-      v.u = 1;                                                                 \
-      v.d = copysign##suff(v.d, y);                                            \
-      break;                                                                   \
-    case FP_INFINITE:                                                          \
-      break;                                                                   \
-    case FP_NORMAL:                                                            \
-    case FP_SUBNORMAL:                                                         \
-      v.u += dir;                                                              \
-      break;                                                                   \
-    default:                                                                   \
-      __ESBMC_assert(0, "invalid fpclassify value");                           \
-    }                                                                          \
-    if(isfinite(x) && !isfinite(v.d))                                          \
-    {                                                                          \
-      feraiseexcept(FE_OVERFLOW);                                              \
-      errno = ERANGE;                                                          \
-      v.d = copysign##suff(HUGE_VAL, x);                                       \
-    }                                                                          \
-    if(                                                                        \
-      islessgreater(x, y) && isfinite(v.d) &&                                  \
-      (!isnormal(v.d) || v.d == (dbl)0))                                       \
-    {                                                                          \
-      feraiseexcept(FE_UNDERFLOW);                                             \
-      errno = ERANGE;                                                          \
-    }                                                                          \
-    return v.d;                                                                \
-  }
-
-NEXTAFTER(, double, uint64_t)
-NEXTAFTER(f, float, uint32_t)
-
-#undef NEXTAFTER
+	if (isnan(x) || isnan(y))
+		return x + y;
+	if (ux.i == uy.i)
+		return y;
+	ax = ux.i & -1ULL/2;
+	ay = uy.i & -1ULL/2;
+	if (ax == 0) {
+		if (ay == 0)
+			return y;
+		ux.i = (uy.i & 1ULL<<63) | 1;
+	} else if (ax > ay || ((ux.i ^ uy.i) & 1ULL<<63))
+		ux.i--;
+	else
+		ux.i++;
+	e = ux.i >> 52 & 0x7ff;
+	/* raise overflow if ux.f is infinite and x is finite */
+	if (e == 0x7ff)
+		FORCE_EVAL(x+x);
+	/* raise underflow if ux.f is subnormal or zero */
+	if (e == 0)
+		FORCE_EVAL(x*x + ux.f*ux.f);
+	return ux.f;
+}

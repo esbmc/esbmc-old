@@ -1,49 +1,68 @@
-#define __CRT__NO_INLINE /* Don't let mingw insert code */
-
-#ifdef _MSVC
-#define _USE_MATH_DEFINES
-#define _CRT_FUNCTIONS_REQUIRED 0
-#endif
 #include <math.h>
+#include <stdint.h>
 
-#define fmod_def(type, name, isnan_func, isinf_func, isfinite_func)                    \
-  type name(type x, type y)                                                            \
-  {                                                                                    \
-  __ESBMC_HIDE:;                                                                       \
-    int x_is_nan = isnan_func(x);                                                      \
-    int y_is_nan = isnan_func(y);                                                      \
-                                                                                       \
-    /* If either argument is NaN, NaN is returned */                                   \
-    if(x_is_nan || y_is_nan)                                                           \
-      return NAN;                                                                      \
-                                                                                       \
-    /* If x is +inf/-inf and y is not NaN, NaN is returned and FE_INVALID is raised */ \
-    if(isinf_func(x))                                                                  \
-      return NAN;                                                                      \
-                                                                                       \
-    /* If y is +0.0/-0.0 and x is not NaN, NaN is returned and FE_INVALID is raised */ \
-    if(y == 0.0)                                                                       \
-      return NAN;                                                                      \
-                                                                                       \
-    /* If x is +0.0/-0.0 and y is not zero, +0.0/-0.0 is returned */                   \
-    if(x == 0.0)                                                                       \
-      return x;                                                                        \
-                                                                                       \
-    /* If y is +inf/-inf and x is finite, x is returned. */                            \
-    if(isinf_func(y) && isfinite_func(x))                                              \
-      return x;                                                                        \
-                                                                                       \
-    return x - (y * (int)(x / y));                                                     \
-  }                                                                                    \
-                                                                                       \
-  type __##name(type x, type y)                                                        \
-  {                                                                                    \
-  __ESBMC_HIDE:;                                                                       \
-    return name(x, y);                                                                 \
-  }
+double fmod(double x, double y)
+{
+	union {double f; uint64_t i;} ux = {x}, uy = {y};
+	int ex = ux.i>>52 & 0x7ff;
+	int ey = uy.i>>52 & 0x7ff;
+	int sx = ux.i>>63;
+	uint64_t i;
 
-fmod_def(float, fmodf, isnan, isinf, isfinite);
-fmod_def(double, fmod, isnan, isinf, isfinite);
-fmod_def(long double, fmodl, isnan, isinf, isfinite);
+	/* in the followings uxi should be ux.i, but then gcc wrongly adds */
+	/* float load/store to inner loops ruining performance and code size */
+	uint64_t uxi = ux.i;
 
-#undef fmod_def
+	if (uy.i<<1 == 0 || isnan(y) || ex == 0x7ff)
+		return (x*y)/(x*y);
+	if (uxi<<1 <= uy.i<<1) {
+		if (uxi<<1 == uy.i<<1)
+			return 0*x;
+		return x;
+	}
+
+	/* normalize x and y */
+	if (!ex) {
+		for (i = uxi<<12; i>>63 == 0; ex--, i <<= 1);
+		uxi <<= -ex + 1;
+	} else {
+		uxi &= -1ULL >> 12;
+		uxi |= 1ULL << 52;
+	}
+	if (!ey) {
+		for (i = uy.i<<12; i>>63 == 0; ey--, i <<= 1);
+		uy.i <<= -ey + 1;
+	} else {
+		uy.i &= -1ULL >> 12;
+		uy.i |= 1ULL << 52;
+	}
+
+	/* x mod y */
+	for (; ex > ey; ex--) {
+		i = uxi - uy.i;
+		if (i >> 63 == 0) {
+			if (i == 0)
+				return 0*x;
+			uxi = i;
+		}
+		uxi <<= 1;
+	}
+	i = uxi - uy.i;
+	if (i >> 63 == 0) {
+		if (i == 0)
+			return 0*x;
+		uxi = i;
+	}
+	for (; uxi>>52 == 0; uxi <<= 1, ex--);
+
+	/* scale result */
+	if (ex > 0) {
+		uxi -= 1ULL << 52;
+		uxi |= (uint64_t)ex << 52;
+	} else {
+		uxi >>= -ex + 1;
+	}
+	uxi |= (uint64_t)sx << 63;
+	ux.i = uxi;
+	return ux.f;
+}

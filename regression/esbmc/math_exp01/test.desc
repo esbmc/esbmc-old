@@ -1,4 +1,4 @@
-KNOWNBUG
+CORE
 main.c
 --no-bounds-check --no-pointer-check --no-div-by-zero-check --no-simplify --unwind 20
 ^VERIFICATION SUCCESSFUL$
