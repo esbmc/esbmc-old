@@ -796,10 +796,13 @@ smt_convt::resultt bmct::multi_property_check(
                      options.get_bool_option("condition-coverage-rm") ||
                      options.get_bool_option("condition-coverage-claims-rm");
   bool is_keep_verified = options.get_bool_option("keep-verified-claims");
+
+  // For multi-kind/ multi-incr
   bool is_clear_verified = (options.get_bool_option("k-induction") ||
                             options.get_bool_option("incremental-bmc") ||
                             options.get_bool_option("k-induction-parallel")) &&
                            !is_keep_verified;
+  std::set<std::pair<std::string, std::string>> to_remove_claims = {{}};
   // For multi-fail-fast
   const std::string fail_fast = options.get_option("multi-fail-fast");
   const bool is_fail_fast = !fail_fast.empty() ? true : false;
@@ -840,7 +843,8 @@ smt_convt::resultt bmct::multi_property_check(
                        &is_clear_verified,
                        &is_fail_fast,
                        &fail_fast_limit,
-                       &fail_fast_cnt](const size_t &i) {
+                       &fail_fast_cnt,
+                       &to_remove_claims](const size_t &i) {
     //"multi-fail-fast n": stop after first n SATs found.
     if (is_fail_fast && fail_fast_cnt >= fail_fast_limit)
       return;
@@ -928,27 +932,40 @@ smt_convt::resultt bmct::multi_property_check(
 
       // for kind && incr: remove verified claims
       if (is_clear_verified)
+        to_remove_claims.insert(
+          std::make_pair(claim.claim_msg, claim.claim_loc));
+    }
+  };
+
+  std::for_each(std::begin(jobs), std::end(jobs), job_function);
+
+  // remove claims
+  if (is_clear_verified && !to_remove_claims.empty())
+  {
+    Forall_goto_functions (f_it, symex->goto_functions)
+    {
+      if (f_it->second.body_available)
       {
-        for (auto &it : symex->goto_functions.function_map)
+        goto_programt &goto_program = f_it->second.body;
+        std::string claim_msg, claim_loc;
+        std::pair<std::string, std::string> claim_pair;
+        Forall_goto_program_instructions (it, goto_program)
         {
-          for (auto &instruction : it.second.body.instructions)
+          if (it->is_assert())
           {
-            if (
-              instruction.is_assert() &&
-              from_expr(ns, "", instruction.guard) == claim.claim_msg &&
-              instruction.location.as_string() == claim.claim_loc)
+            claim_msg = from_expr(ns, "", it->guard);
+            claim_loc = it->location.as_string();
+            claim_pair = std::make_pair(claim_msg, claim_loc);
+            if (to_remove_claims.count(claim_pair))
             {
-              // convert ASSERT to SKIP
-              instruction.make_skip();
-              break;
+              it->make_skip();
+              to_remove_claims.erase(claim_pair);
             }
           }
         }
       }
     }
-  };
-
-  std::for_each(std::begin(jobs), std::end(jobs), job_function);
+  }
 
   // For coverage
   // Assertion Coverage:
