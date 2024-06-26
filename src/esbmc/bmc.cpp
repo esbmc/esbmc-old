@@ -931,6 +931,8 @@ smt_convt::resultt bmct::multi_property_check(
       fail_fast_cnt++;
 
       // for kind && incr: remove verified claims
+      // we should not remove it in each job run as it may be
+      // the same claim which claim_msg with different claim_msg due to unwinding
       if (is_clear_verified)
         to_remove_claims.insert(
           std::make_pair(claim.claim_msg, claim.claim_loc));
@@ -939,7 +941,7 @@ smt_convt::resultt bmct::multi_property_check(
 
   std::for_each(std::begin(jobs), std::end(jobs), job_function);
 
-  // remove claims
+  // remove verified claims from the Goto functions
   if (is_clear_verified && !to_remove_claims.empty())
   {
     Forall_goto_functions (f_it, symex->goto_functions)
@@ -958,8 +960,8 @@ smt_convt::resultt bmct::multi_property_check(
             claim_pair = std::make_pair(claim_msg, claim_loc);
             if (to_remove_claims.count(claim_pair))
             {
+              // convert assert to skip
               it->make_skip();
-              to_remove_claims.erase(claim_pair);
             }
           }
         }
