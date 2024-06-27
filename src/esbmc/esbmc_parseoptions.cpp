@@ -1833,6 +1833,7 @@ bool esbmc_parseoptionst::process_goto_program(
       cmdline.isset("assertion-coverage-claims"))
     {
       // for multi-property
+      options.set_option("result-only", true);
       options.set_option("base-case", true);
       options.set_option("multi-property", true);
       options.set_option("keep-verified-claims", false);
@@ -1848,6 +1849,7 @@ bool esbmc_parseoptionst::process_goto_program(
       cmdline.isset("condition-coverage-claims-rm"))
     {
       // for multi-property
+      options.set_option("result-only", true);
       options.set_option("base-case", true);
       options.set_option("multi-property", true);
       options.set_option("keep-verified-claims", false);
