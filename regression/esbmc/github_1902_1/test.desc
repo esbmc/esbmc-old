@@ -1,4 +1,4 @@
-KNOWNBUG
+CORE
 main.c 
 --multi-property --k-induction
 ^VERIFICATION UNKNOWN$
