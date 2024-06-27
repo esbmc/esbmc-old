@@ -1,0 +1,5 @@
+KNOWNBUG
+main.c 
+--multi-property --k-induction
+^VERIFICATION UNKNOWN$
+
