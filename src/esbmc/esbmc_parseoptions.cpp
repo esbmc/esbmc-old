@@ -1269,7 +1269,7 @@ tvt esbmc_parseoptionst::is_base_case_violated(
   options.set_option("partial-loops", false);
   options.set_option("unwind", integer2string(k_step));
 
-  bmct bmc(goto_functions, options, context);
+  bmct bmc(goto_functions, options, context, to_remove_claims);
 
   log_status("Checking base case, k = {:d}", k_step);
   switch (do_bmc(bmc))
@@ -1833,7 +1833,6 @@ bool esbmc_parseoptionst::process_goto_program(
       cmdline.isset("assertion-coverage-claims"))
     {
       // for multi-property
-      options.set_option("result-only", true);
       options.set_option("base-case", true);
       options.set_option("multi-property", true);
       options.set_option("keep-verified-claims", false);
@@ -1849,7 +1848,6 @@ bool esbmc_parseoptionst::process_goto_program(
       cmdline.isset("condition-coverage-claims-rm"))
     {
       // for multi-property
-      options.set_option("result-only", true);
       options.set_option("base-case", true);
       options.set_option("multi-property", true);
       options.set_option("keep-verified-claims", false);
