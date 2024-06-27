@@ -1,6 +1,6 @@
-CORE
+FUTURE
 main.c 
 --multi-property --k-induction
-^VERIFICATION UNKNOWN$
+^VERIFICATION FAILED$
 
 
