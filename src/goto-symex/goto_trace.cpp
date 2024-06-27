@@ -360,7 +360,7 @@ void correctness_graphml_goto_trace(
   graph.generate_graphml(options);
 }
 
-void  show_goto_trace(
+void show_goto_trace(
   std::ostream &out,
   const namespacet &ns,
   const goto_tracet &goto_trace)
