@@ -166,7 +166,7 @@ bool solidity_convertert::convert()
         return true; // 'true' indicates something goes wrong.
 
       // add implicit construcor function
-      if (add_implicit_constructor())
+      if (add_implicit_constructor(current_contractName))
         return true;
 
       // handling mapping_init
@@ -623,13 +623,18 @@ bool solidity_convertert::get_var_decl(
     const std::string contract_name =
       ast_node["typeName"]["pathNode"]["name"].get<std::string>();
 
-    // 2. since the contract type variable has no initial value, i.e. explicit constructor call,
+    // 2. add a empty constructor even if there is a constructor already
+    // the idea is to mimic C++
+    if (add_implicit_constructor(contract_name))
+      return true;
+
+    // 3. since the contract type variable has no initial value, i.e. explicit constructor call,
     // we construct an implicit constructor expression
     exprt val;
     if (get_implicit_ctor_ref(val, contract_name))
       return true;
 
-    // 3. make it to a temporary object
+    // 4. make it to a temporary object
     side_effect_exprt tmp_obj("temporary_object", val.type());
     codet code_expr("expression");
     code_expr.operands().push_back(val);
@@ -637,10 +642,10 @@ bool solidity_convertert::get_var_decl(
     tmp_obj.location() = val.location();
     val.swap(tmp_obj);
 
-    // 4. generate typecast for Solidity contract
+    // 5. generate typecast for Solidity contract
     solidity_gen_typecast(ns, val, t);
 
-    // 5. add constructor call to declaration operands
+    // 6. add constructor call to declaration operands
     added_symbol.value = val;
     decl.operands().push_back(val);
   }
@@ -994,14 +999,15 @@ bool solidity_convertert::get_error_definition(const nlohmann::json &ast_node)
   return false;
 }
 
-bool solidity_convertert::add_implicit_constructor()
+// add a empty constructor to the contract
+// Note that the target contract might already contain an explicit ctor
+bool solidity_convertert::add_implicit_constructor(
+  const std::string &contract_name)
 {
   std::string name, id;
-  name = current_contractName;
+  name = contract_name;
+  id = get_implict_ctor_call_id(contract_name);
 
-  id = get_ctor_call_id(current_contractName);
-
-  // ctor is already in the symbol table
   if (context.find_symbol(id) != nullptr)
     return false;
 
@@ -1785,16 +1791,6 @@ bool solidity_convertert::get_expr(
   {
     if (expr["referencedDeclaration"] > 0)
     {
-      // for Contract Type Identifier Only
-      if (
-        expr["typeDescriptions"]["typeString"].get<std::string>().find(
-          "contract") != std::string::npos)
-      {
-        // TODO
-        log_error("we do not handle contract type identifier for now");
-        return true;
-      }
-
       // Soldity uses +ve odd numbers to refer to var or functions declared in the contract
       const nlohmann::json &decl = find_decl_ref(expr["referencedDeclaration"]);
       if (decl == empty_json)
@@ -4629,11 +4625,17 @@ bool solidity_convertert::get_mapping_definition(
 bool solidity_convertert::move_mapping_to_ctor()
 {
   // no mapping
-  if (map_init_block.is_empty())
+  if (map_init_block.operands().size() == 0)
     return false;
 
   // get ctor
-  std::string ctor_id = get_ctor_call_id(current_contractName);
+  std::string ctor_id;
+
+  // we first try to find the explicit constructor defined in the source file.
+  ctor_id = get_explicit_ctor_call_id(current_contractName);
+  if (ctor_id.empty())
+    // then we try to find the implicit constructor we manually added
+    ctor_id = get_implict_ctor_call_id(current_contractName);
   if (context.find_symbol(ctor_id) == nullptr)
     return true;
   symbolt &ctor = *context.find_symbol(ctor_id);
@@ -5096,10 +5098,15 @@ void solidity_convertert::get_function_definition_name(
     ast_node.contains("kind") &&
     ast_node["kind"].get<std::string>() == "constructor")
   {
+    // In solidity
+    // - constructor does not have a name
+    // - there can be only one constructor in each contract
+    // we, however, mimic the C++ grammar to manually assign it with a name
+    // whichi is identical to the contract name
+    // we also allows multiple constructor where the added ctor has no  `id`
     name = contract_name;
-    // constructors cannot be overridden, primarily because they don't have names
-    // to align with the implicit constructor, we do not add the 'id'
-    id = "sol:@C@" + contract_name + "@F@" + name + "#";
+    id = "sol:@C@" + contract_name + "@F@" + name + "#" +
+         i2string(ast_node["id"].get<std::int16_t>());
   }
   else
   {
@@ -5120,8 +5127,39 @@ unsigned int solidity_convertert::add_offset(
   return end_position;
 }
 
+// get the implicit constructor symbol id
+// retrun empty string if no explicit ctor
 std::string
-solidity_convertert::get_ctor_call_id(const std::string &contract_name)
+solidity_convertert::get_explicit_ctor_call_id(const std::string &contract_name)
+{
+  if (!exportedSymbolsList.empty())
+  {
+    // get contract id from exportedSymbolsList
+    for (auto i = exportedSymbolsList.begin(); i != exportedSymbolsList.end();
+         i++)
+    {
+      if (i->second == contract_name)
+      {
+        int contract_ref_id = i->first;
+        // get the constructor
+        auto ctor_ref = find_constructor_ref(contract_ref_id);
+        if (!ctor_ref.empty())
+        {
+          int id = ctor_ref["id"].get<int>();
+          return "sol:@C@" + contract_name + "@F@" + contract_name + "#" +
+                 std::to_string(id);
+        }
+      }
+    }
+  }
+
+  // not found
+  return "";
+}
+
+// get the implicit constructor symbol id
+std::string
+solidity_convertert::get_implict_ctor_call_id(const std::string &contract_name)
 {
   return "sol:@C@" + contract_name + "@F@" + contract_name + "#";
 }
@@ -5472,8 +5510,8 @@ solidity_convertert::find_decl_ref(int ref_decl_id, std::string &contract_name)
   return empty_json;
 }
 
-// return construcor node
-const nlohmann::json &solidity_convertert::find_constructor_ref(int ref_decl_id)
+// return construcor node based on the *contract* id
+const nlohmann::json &solidity_convertert::find_constructor_ref(int contract_id)
 {
   nlohmann::json &nodes = src_ast_json["nodes"];
   unsigned index = 0;
@@ -5481,7 +5519,7 @@ const nlohmann::json &solidity_convertert::find_constructor_ref(int ref_decl_id)
        ++itr, ++index)
   {
     if (
-      (*itr)["id"].get<int>() == ref_decl_id &&
+      (*itr)["id"].get<int>() == contract_id &&
       (*itr)["nodeType"] == "ContractDefinition")
     {
       nlohmann::json &ast_nodes = nodes.at(index)["nodes"];
@@ -5882,9 +5920,12 @@ bool solidity_convertert::get_implicit_ctor_ref(
   // to obtain the type info
   std::string name, id;
 
-  id = get_ctor_call_id(contract_name);
+  id = get_implict_ctor_call_id(contract_name);
   if (context.find_symbol(id) == nullptr)
-    return true;
+  {
+    if (add_implicit_constructor(contract_name))
+      return true;
+  }
   const symbolt &s = *context.find_symbol(id);
   typet type = s.type;
 
@@ -6092,6 +6133,11 @@ bool solidity_convertert::get_empty_array_ref(
 bool solidity_convertert::multi_transaction_verification(
   const std::string &contractName)
 {
+  log_debug(
+    "Solidity",
+    "@@@ performs transaction verification on contract {}",
+    contractName);
+
   /*
   convert the verifying contract to a "sol_main" function, e.g.
 
@@ -6146,13 +6192,17 @@ bool solidity_convertert::multi_transaction_verification(
     const symbolt &contract = *context.find_symbol(id);
     assert(contract.type.is_struct() && "A contract should be a struct");
 
-    // 1.2 construct a constructor call and move to func_body
-    const std::string ctor_id = get_ctor_call_id(c_name);
+    // 1.2 construct a constructor function call and move to func_body
+    std::string ctor_id;
+    // we first try to find the explicit constructor defined in the source file.
+    ctor_id = get_explicit_ctor_call_id(c_name);
+    if (ctor_id.empty())
+      // then we try to find the implicit constructor we manually added
+      ctor_id = get_implict_ctor_call_id(c_name);
 
     if (context.find_symbol(ctor_id) == nullptr)
     {
-      // if the input contract name is not found in the src file, return true
-      log_error("Input contract is not found in the source file.");
+      log_error("No constructor found.");
       return true;
     }
     const symbolt &constructor = *context.find_symbol(ctor_id);

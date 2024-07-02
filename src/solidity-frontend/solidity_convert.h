@@ -52,7 +52,7 @@ protected:
   void add_empty_function_body(nlohmann::json &ast_node);
 
   // handle the implicit constructor
-  bool add_implicit_constructor();
+  bool add_implicit_constructor(const std::string &contract_name);
   bool get_implicit_ctor_ref(exprt &new_expr, const std::string &contract_name);
   bool
   get_struct_class_fields(const nlohmann::json &ast_node, struct_typet &type);
@@ -191,7 +191,8 @@ protected:
     std::string id,
     locationt location);
 
-  std::string get_ctor_call_id(const std::string &contract_name);
+  std::string get_explicit_ctor_call_id(const std::string &contract_name);
+  std::string get_implict_ctor_call_id(const std::string &contract_name);
   bool get_sol_builtin_ref(const nlohmann::json expr, exprt &new_expr);
 
   // literal conversion functions
