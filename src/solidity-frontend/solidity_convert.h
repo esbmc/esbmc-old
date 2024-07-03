@@ -42,7 +42,10 @@ protected:
   bool get_var_decl(const nlohmann::json &ast_node, exprt &new_expr);
   bool get_function_definition(const nlohmann::json &ast_node);
   bool get_function_params(const nlohmann::json &pd, exprt &param);
-  bool get_default_function(const std::string name, const std::string id);
+  bool get_default_function(
+    const std::string name,
+    const std::string id,
+    symbolt &added_symbol);
 
   // handle the non-contract definition, including struct/enum/error/event/abstract/...
   bool get_noncontract_defition(nlohmann::json &ast_node);
@@ -54,6 +57,9 @@ protected:
   // handle the implicit constructor
   bool add_implicit_constructor(const std::string &contract_name);
   bool get_implicit_ctor_ref(exprt &new_expr, const std::string &contract_name);
+  bool get_instantiation_ctor_call(
+    const std::string &contract_name,
+    exprt &new_expr);
   bool
   get_struct_class_fields(const nlohmann::json &ast_node, struct_typet &type);
   bool
@@ -191,6 +197,7 @@ protected:
     std::string id,
     locationt location);
 
+  bool get_ctor_call_id(const std::string &contract_name, std::string &ctor_id);
   std::string get_explicit_ctor_call_id(const std::string &contract_name);
   std::string get_implict_ctor_call_id(const std::string &contract_name);
   bool get_sol_builtin_ref(const nlohmann::json expr, exprt &new_expr);
