@@ -2249,71 +2249,98 @@ bool solidity_convertert::get_expr(
       callee_expr_json["nodeType"] == "MemberAccess")
     {
       // ContractMemberCall
+      // - x.setAddress();
+      // - x.address();
+      // The later one is quite special, as in Solidity variables behave like functions from the perspective of other contracts.
+      // e.g. b._addr is not an address, but a function that returns an address.
+      const nlohmann::json &caller_expr_json = callee_expr_json["expression"];
+      assert(callee_expr_json.contains("referencedDeclaration"));
+      assert(caller_expr_json.contains("referencedDeclaration"));
 
-      const int contract_func_id =
+      const int contract_var_id =
+        caller_expr_json["referencedDeclaration"].get<int>();
+      const nlohmann::json &base_expr_json = find_decl_ref(contract_var_id);
+
+      const int member_id =
         callee_expr_json["referencedDeclaration"].get<int>();
-      const nlohmann::json caller_expr_json = find_decl_ref(contract_func_id);
-      if (caller_expr_json == empty_json)
+      const nlohmann::json &member_decl_ref = find_decl_ref(member_id);
+      if (base_expr_json.empty() || member_decl_ref.empty())
         return true;
 
-      std::string ref_contract_name;
-      if (get_current_contract_name(caller_expr_json, ref_contract_name))
-        return true;
-
-      std::string name, id;
-      get_function_definition_name(caller_expr_json, name, id);
-
-      if (context.find_symbol(id) == nullptr)
-        // probably a built-in function
-        // that is not supported yet
-        return true;
-
-      const symbolt s = *context.find_symbol(id);
-      typet type = s.type;
-
-      new_expr = exprt("symbol", type);
-      new_expr.identifier(id);
-      new_expr.cmt_lvalue(true);
-      new_expr.name(name);
-      new_expr.set("#member_name", prefix + ref_contract_name);
-
-      // obtain the type of return value
-      // It can be retrieved directly from the original function declaration
-      typet t;
-      if (get_type_description(caller_expr_json["returnParameters"], t))
-        return true;
-
-      side_effect_expr_function_callt call;
-      call.function() = new_expr;
-      call.type() = t;
-
-      // populate params
-      auto param_nodes = caller_expr_json["parameters"]["parameters"];
-      unsigned num_args = 0;
-      nlohmann::json param = nullptr;
-      nlohmann::json::iterator itr = param_nodes.begin();
-
-      for (const auto &arg : expr["arguments"].items())
+      auto elem_type =
+        SolidityGrammar::get_contract_body_element_t(member_decl_ref);
+      switch (elem_type)
       {
-        if (itr != param_nodes.end())
-        {
-          if ((*itr).contains("typeDescriptions"))
-          {
-            param = (*itr)["typeDescriptions"];
-          }
-          ++itr;
-        }
-
-        exprt single_arg;
-        if (get_expr(arg.value(), param, single_arg))
+      case SolidityGrammar::VarDecl:
+      {
+        // similar process as StructMemberCall
+        exprt base;
+        if (get_var_decl_ref(base_expr_json, base))
           return true;
 
-        call.arguments().push_back(single_arg);
-        ++num_args;
-        param = nullptr;
+        exprt comp;
+        if (get_var_decl_ref(member_decl_ref, comp))
+          return true;
+
+        assert(comp.name() == callee_expr_json["memberName"]);
+        new_expr = member_exprt(base, comp.name(), comp.type());
+
+        break;
+      }
+      case SolidityGrammar::FunctionDef:
+      {
+        exprt func;
+        if (get_func_decl_ref(member_decl_ref, func))
+          return true;
+
+        // obtain the type of return value
+        code_typet t;
+        if (get_type_description(
+              member_decl_ref["returnParameters"], t.return_type()))
+          return true;
+
+        side_effect_expr_function_callt call;
+        call.function() = func;
+        call.type() = t;
+
+        // populate params
+        auto param_nodes = member_decl_ref["parameters"]["parameters"];
+        unsigned num_args = 0;
+        nlohmann::json param = nullptr;
+        nlohmann::json::iterator itr = param_nodes.begin();
+
+        for (const auto &arg : expr["arguments"].items())
+        {
+          if (itr != param_nodes.end())
+          {
+            if ((*itr).contains("typeDescriptions"))
+            {
+              param = (*itr)["typeDescriptions"];
+            }
+            ++itr;
+          }
+
+          exprt single_arg;
+          if (get_expr(arg.value(), param, single_arg))
+            return true;
+
+          call.arguments().push_back(single_arg);
+          ++num_args;
+          param = nullptr;
+        }
+
+        new_expr = call;
+        break;
+      }
+      default:
+      {
+        log_error(
+          "Unexpected Member Access Element Type, Got {}",
+          SolidityGrammar::contract_body_element_to_str(elem_type));
+        return true;
+      }
       }
 
-      new_expr = call;
       break;
     }
 
