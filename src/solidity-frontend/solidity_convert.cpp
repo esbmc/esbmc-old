@@ -644,10 +644,7 @@ bool solidity_convertert::get_var_decl(
     tmp_obj.location() = val.location();
     val.swap(tmp_obj);
 
-    // 4. generate typecast for Solidity contract
-    solidity_gen_typecast(ns, val, t);
-
-    // 5. add constructor call to declaration operands
+    // 4. add constructor call to declaration operands
     added_symbol.value = val;
     decl.operands().push_back(val);
   }
@@ -1054,24 +1051,23 @@ bool solidity_convertert::get_instantiation_ctor_call(
 
   // add "int* p" to the function param
   typet param_type = pointer_typet(int_type());
-  auto param = code_typet::argumentt();
-  param.type() = param_type;
 
   // the name and id can be hard-coded since they will not be referred
-  param.cmt_base_name("p");
-  param.cmt_identifier(
-    "sol:@C@" + contract_name + "@F@" + contract_name + "@p#");
-  param.location() = location_begin;
-
+  std::string p_name = "p";
+  std::string p_id = "sol:@C@" + contract_name + "@F@" + contract_name + "@p#";
   symbolt param_symbol;
   get_default_symbol(
-    param_symbol, debug_modulename, param_type, name, id, location_begin);
-
+    param_symbol, debug_modulename, param_type, p_name, p_id, location_begin);
   param_symbol.lvalue = true;
   param_symbol.is_parameter = true;
   param_symbol.file_local = true;
-
   move_symbol_to_context(param_symbol);
+
+  auto param = code_typet::argumentt();
+  param.type() = param_type;
+  param.cmt_base_name(p_name);
+  param.cmt_identifier(p_id);
+  param.location() = location_begin;
 
   // update the param
   type.arguments().push_back(param);
@@ -1079,9 +1075,14 @@ bool solidity_convertert::get_instantiation_ctor_call(
 
   // 2. construct the ctor call
   side_effect_expr_function_callt call;
-  struct_typet tmp = struct_typet();
+
+  std::string contract_id = prefix + contract_name;
+  typet contract_type(irept::id_symbol);
+  contract_type.identifier(contract_id);
+  call.type() = contract_type;
+
   call.function() = symbol_expr(added_symbol);
-  call.type() = tmp;
+  call.function().set("constructor", 1);
 
   // add parameter: nullptr
   // 1: constant
@@ -1095,9 +1096,7 @@ bool solidity_convertert::get_instantiation_ctor_call(
   exprt arg = gen_zero(null_type);
   call.arguments().push_back(arg);
 
-  call.set("constructor", 1);
   new_expr = call;
-
   return false;
 }
 
@@ -5957,28 +5956,27 @@ bool solidity_convertert::get_constructor_call(
   if (constructor_ref.empty())
     return get_implicit_ctor_ref(new_expr, contract_name);
 
+  // get the constuctor symbol
   if (get_func_decl_ref(constructor_ref, callee))
     return true;
 
   // obtain the type info
+  // e.g.
+  //  * type: symbol
+  //    * identifier: tag-Base
   std::string id = prefix + contract_name;
-  if (context.find_symbol(id) == nullptr)
-    return true;
+  typet type(irept::id_symbol);
+  type.identifier(id);
 
-  const symbolt &s = *context.find_symbol(id);
-  typet type = s.type;
-
+  // setup initializer
   side_effect_expr_function_callt call;
-  call.function() = callee;
   call.type() = type;
+  call.function() = callee;
+  call.function().set("constructor", 1);
 
+  // pass args
   auto param_nodes = constructor_ref["parameters"]["parameters"];
   unsigned num_args = 0;
-
-  exprt new_obj("new_object");
-  new_obj.type() = type;
-  call.arguments().push_back(address_of_exprt(new_obj));
-
   for (const auto &arg : ast_node["arguments"].items())
   {
     nlohmann::json param = nullptr;
@@ -6000,10 +5998,15 @@ bool solidity_convertert::get_constructor_call(
     ++num_args;
   }
 
-  // for adjustment
-  call.set("constructor", 1);
-  new_expr = call;
+  // construct temporary object
+  side_effect_exprt tmp_obj("temporary_object", type);
+  codet code_expr("expression");
+  code_expr.operands().push_back(call);
+  tmp_obj.initializer(code_expr);
+  tmp_obj.location() = call.location();
+  call.swap(tmp_obj);
 
+  new_expr = call;
   return false;
 }
 
