@@ -607,23 +607,24 @@ bool solidity_convertert::get_var_decl(
     added_symbol.value = val;
     decl.operands().push_back(val);
   }
-
-  // special handle for contract-type variable instantiation
-  // e.g.
-  //  Base x ==> Base x = Base();
-  // in Solidity, the contract-type var will not get automatically instantiated
-  // however in c++ (and also the backend of ESBMC), the class-type object will get instantiated
-  // therefore, we manually create a constructor which
-  // - has a empty body
-  // - will not be conflict with the ctor in the src file by any means.
-  // Approach: since there is no pointer in Solidity, we create a ctor like:
-  //   Base(int *p){}
-  // and the object will be instantiated as Base x = Base(nullptr);
   else if (
     SolidityGrammar::get_type_name_t(
       ast_node["typeName"]["typeDescriptions"]) ==
     SolidityGrammar::ContractTypeName)
   {
+    /*
+      Special handling for contract-type variable instantiation
+      e.g.  Base x ==> Base x = Base();
+      In Solidity, the contract-type var will not get automatically instantiated.
+      However in c++ (and also the backend of ESBMC), the class-type object will get instantiated.
+      Therefore, we manually create a constructor which
+      - has a empty body
+      - will not be conflict with the ctor in the src file by any means.
+      Approach: since there is no pointer in Solidity, we create a ctor like:
+        Base(int *p){}
+      and the object will be instantiated as Base x = Base(nullptr);
+    */
+
     // 1. get constract name
     assert(
       ast_node["typeName"]["nodeType"].get<std::string>() ==

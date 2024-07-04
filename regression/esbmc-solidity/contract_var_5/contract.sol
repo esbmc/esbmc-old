@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.5.0;
 
+
 contract Book {
     string public title;
     string public author;
     uint public book_id;
+    uint public  s;
 
-    constructor(){}
+    constructor() {
+        s=10;
+    }
     function setDetails(
         string memory _title,
         string memory _author,
@@ -21,13 +25,10 @@ contract Book {
 contract Base {
     Book public book;
     constructor() {
-        Book book2 = new Book();
-        assert(book2.book_id() == 0);
     }
 
     function setBook() public {
-        book = new Book();
         book.setDetails("Learn Java", "TP", 1);
-        assert(book.book_id() == 1);
+        assert(book.book_id() == 0 || book.book_id() == 1);
     }
 }

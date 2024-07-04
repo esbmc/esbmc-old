@@ -4,9 +4,11 @@ pragma solidity >=0.5.0;
 contract Book {
     string public title;
     string public author;
-    uint public book_id;
+    uint public book_id = 1;
 
-    constructor(){}
+    constructor() {
+        book_id = 2;
+    }
     function setDetails(
         string memory _title,
         string memory _author,
@@ -22,7 +24,7 @@ contract Base {
     Book public book;
     constructor() {
         Book book2 = new Book();
-        assert(book2.book_id() == 0);
+        assert(book2.book_id() == 2);
     }
 
     function setBook() public {
