@@ -1,0 +1,11 @@
+url_path,views_total,views_unique
+/esbmc/esbmc,648,124
+/esbmc/esbmc/blob/master/BUILDING.md,289,25
+/esbmc/esbmc/pulls,191,15
+/esbmc/esbmc/issues,134,28
+/esbmc/esbmc/commits/master,94,9
+/esbmc/esbmc/tree/master/src,71,14
+/esbmc/esbmc/blob/master/README.md,66,11
+/esbmc/esbmc/pull/1914,63,6
+/esbmc/esbmc/blob/master/regression/ltl/basic-success/test-neg.ba-2.c,60,1
+/esbmc/esbmc/actions,58,6
