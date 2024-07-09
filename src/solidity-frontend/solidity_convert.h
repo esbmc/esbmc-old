@@ -42,6 +42,12 @@ protected:
   bool get_var_decl(const nlohmann::json &ast_node, exprt &new_expr);
   bool get_function_definition(const nlohmann::json &ast_node);
   bool get_function_params(const nlohmann::json &pd, exprt &param);
+  void get_function_this_pointer_param(
+    const std::string &contract_name,
+    const std::string &ctor_id,
+    const std::string &debug_modulename,
+    const locationt &location_begin,
+    code_typet &type);
   bool get_default_function(
     const std::string name,
     const std::string id,
@@ -111,7 +117,17 @@ protected:
     const nlohmann::json &ast_node,
     std::string &name,
     std::string &id);
+  bool get_function_call(
+    const exprt &func,
+    const typet &t,
+    const nlohmann::json &decl_ref,
+    const nlohmann::json &epxr,
+    side_effect_expr_function_callt &call);
   bool get_constructor_call(const nlohmann::json &ast_node, exprt &new_expr);
+  bool get_constructor_call(
+    const std::string &contract_name,
+    const std::string &ctor_id,
+    exprt &new_expr);
   bool get_current_contract_name(
     const nlohmann::json &ast_node,
     std::string &contract_name);
@@ -121,6 +137,7 @@ protected:
     const typet &t,
     const locationt &l,
     exprt &new_expr);
+  bool is_library_function(const std::string &id);
   bool get_empty_array_ref(const nlohmann::json &ast_node, exprt &new_expr);
 
   // tuple
@@ -201,6 +218,7 @@ protected:
   std::string get_explicit_ctor_call_id(const std::string &contract_name);
   std::string get_implict_ctor_call_id(const std::string &contract_name);
   bool get_sol_builtin_ref(const nlohmann::json expr, exprt &new_expr);
+  void get_temporary_object(exprt &call, exprt &new_expr);
 
   // literal conversion functions
   bool convert_integer_literal(
