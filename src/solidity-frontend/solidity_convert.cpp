@@ -104,7 +104,7 @@ bool solidity_convertert::convert()
   }
 
   // first round: handle definitions that can be outside of the contract
-  // including struct, enum, interface, event, error, library...
+  // including struct, enum, interface, event, error, library, constant...
   // noted that some can also be inside the contract, e.g. struct, enum...
   index = 0;
   for (nlohmann::json::iterator itr = nodes.begin(); itr != nodes.end();
@@ -112,6 +112,15 @@ bool solidity_convertert::convert()
   {
     if (get_noncontract_defition(*itr))
       return true;
+    if (
+      (*itr)["nodeType"].get<std::string>() == "VariableDeclaration" &&
+      (*itr)["mutability"].get<std::string>() == "constant")
+    {
+      // for constant variable defined in the file level which is outside the contract definition
+      exprt dump;
+      if (get_var_decl(*itr, dump))
+        return true;
+    }
   }
 
   // second round: populate linearizedBaseList
@@ -568,6 +577,10 @@ bool solidity_convertert::get_var_decl(
       return true;
   }
 
+  // set const qualifier
+  if (ast_node.contains("mutability") && ast_node["mutability"] == "constant")
+    t.cmt_constant(true);
+
   bool is_state_var = ast_node["stateVariable"] == true;
 
   // 2. populate id and name
@@ -580,7 +593,7 @@ bool solidity_convertert::get_var_decl(
     return true;
   }
 
-  if (is_state_var)
+  if (is_state_var || current_contractName.empty())
     get_state_var_decl_name(ast_node, name, id);
   else if (current_functionDecl)
   {
@@ -606,17 +619,18 @@ bool solidity_convertert::get_var_decl(
   get_default_symbol(symbol, debug_modulename, t, name, id, location_begin);
 
   symbol.lvalue = true;
-  symbol.static_lifetime = is_state_var;
-  symbol.file_local = !is_state_var;
+  // static_lifetime: this means it's defined in the file level, not inside contract
+  symbol.static_lifetime = current_contractName.empty();
+  symbol.file_local = !symbol.static_lifetime;
   symbol.is_extern = false;
 
   // For state var decl, we look for "value".
   // For local var decl, we look for "initialValue"
   bool has_init =
     (ast_node.contains("value") || ast_node.contains("initialValue"));
-  if (symbol.static_lifetime && !symbol.is_extern && !has_init)
+  if (!has_init)
   {
-    // set default value as zero
+    // for both state and non-state variables, set default value as zero
     symbol.value = gen_zero(t, true);
     symbol.value.zero_initializer(true);
   }
@@ -632,7 +646,7 @@ bool solidity_convertert::get_var_decl(
   if (has_init)
   {
     nlohmann::json init_value =
-      is_state_var ? ast_node["value"] : ast_node["initialValue"];
+      ast_node.contains("value") ? ast_node["value"] : ast_node["initialValue"];
     nlohmann::json literal_type = ast_node["typeDescriptions"];
 
     assert(literal_type != nullptr);
@@ -2810,6 +2824,8 @@ bool solidity_convertert::get_current_contract_name(
       std::string c_name = exportedSymbolsList[scope_id];
       if (linearizedBaseList.count(c_name))
       {
+        // this is to make sure it's indeed a contract
+        // as only contract has inheritance
         contract_name = c_name;
         return false;
       }
@@ -2835,6 +2851,9 @@ bool solidity_convertert::get_current_contract_name(
       std::string c_name = exportedSymbolsList[ref_id];
       if (linearizedBaseList.count(c_name))
         contract_name = exportedSymbolsList[ref_id];
+      else
+        // for definitions that are outside contract
+        contract_name = "";
     }
     else
       find_decl_ref(ref_id, contract_name);
@@ -3663,7 +3682,16 @@ bool solidity_convertert::get_var_decl_ref(
   if (decl["stateVariable"])
     get_state_var_decl_name(decl, name, id);
   else
-    get_var_decl_name(decl, name, id);
+  {
+    std::string c_name;
+    if (get_current_contract_name(decl, c_name))
+      return true;
+    if (c_name.empty() && decl["mutability"] == "constant")
+      // global variable
+      get_state_var_decl_name(decl, name, id);
+    else
+      get_var_decl_name(decl, name, id);
+  }
 
   if (context.find_symbol(id) != nullptr)
     new_expr = symbol_expr(*context.find_symbol(id));
@@ -5365,10 +5393,8 @@ void solidity_convertert::get_location_from_decl(
   // To annotate local declaration within a function
   if (
     ast_node["nodeType"] == "VariableDeclaration" &&
-    ast_node["stateVariable"] == false)
+    ast_node["stateVariable"] == false && current_functionDecl)
   {
-    assert(
-      current_functionDecl); // must have a valid current function declaration
     location.set_function(
       current_functionName); // set the function where this local variable belongs to
   }

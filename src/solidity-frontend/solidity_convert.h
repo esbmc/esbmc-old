@@ -268,7 +268,7 @@ protected:
   std::string current_fileName;
 
   // Auxiliary data structures:
-  // Mapping from the node 'id' to the exported symbol (i.e. contract, error, ....)
+  // Mapping from the node 'id' to the exported symbol (i.e. contract, error, constant var ....)
   std::unordered_map<int, std::string> exportedSymbolsList;
   // Inheritance Order Record <contract_name, Contract_id>
   std::unordered_map<std::string, std::vector<int>> linearizedBaseList;
