@@ -142,6 +142,16 @@ void clang_cpp_adjust::adjust_if(exprt &expr)
   // If the condition is not of boolean type, it must be casted
   gen_typecast(ns, expr.op0(), bool_type());
 
+  if (is_string(expr.type()))
+  {
+    // string s = (i == 0) ? "WW" : "MM";
+    // We need to convert the type to pointer.
+    typet t = pointer_typet();
+    t.subtype() = expr.type().subtype();
+
+    expr.type().swap(t);
+  }
+
   // Typecast both the true and false results
   gen_typecast(ns, expr.op1(), expr.type());
   gen_typecast(ns, expr.op2(), expr.type());
