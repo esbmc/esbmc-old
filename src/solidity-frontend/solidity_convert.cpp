@@ -581,7 +581,11 @@ bool solidity_convertert::get_var_decl(
   if (ast_node.contains("mutability") && ast_node["mutability"] == "constant")
     t.cmt_constant(true);
 
-  bool is_state_var = ast_node["stateVariable"] == true;
+  // record the state infor
+  // this will be used to decide if the var will be converted to this->var
+  // when parsing function body.
+  bool is_state_var = ast_node["stateVariable"].get<bool>();
+  t.set("#sol_state_var", is_state_var);
 
   // 2. populate id and name
   std::string name, id;
@@ -2324,7 +2328,9 @@ bool solidity_convertert::get_expr(
       {
       case SolidityGrammar::VarDecl:
       {
-        // similar process as StructMemberCall
+        // e.g. x.data()
+        // ==> x.data, where data is a state variable in the contract
+        // in Solidity the x.data() is read-only
         exprt base;
         if (get_var_decl_ref(base_expr_json, base))
           return true;
@@ -2333,17 +2339,29 @@ bool solidity_convertert::get_expr(
         if (get_var_decl_ref(member_decl_ref, comp))
           return true;
 
-        assert(comp.name() == callee_expr_json["memberName"]);
-        new_expr = member_exprt(base, comp.name(), comp.type());
+        // comp can be either symbol_expr or member_expr
+        const irep_idt comp_name =
+          comp.name().empty() ? comp.component_name() : comp.name();
+
+        new_expr = member_exprt(base, comp_name, comp.type());
 
         break;
       }
       case SolidityGrammar::FunctionDef:
       {
-        exprt func;
-        if (get_func_decl_ref(member_decl_ref, func))
+        // e.g. x.func()
+        // x    --> base
+        // func --> comp
+        exprt base;
+        if (get_var_decl_ref(base_expr_json, base))
           return true;
 
+        exprt comp;
+        if (get_func_decl_ref(member_decl_ref, comp))
+          return true;
+
+        // note that here is comp.identifier not comp.name
+        exprt mem_access = member_exprt(base, comp.identifier(), comp.type());
         // obtain the type of return value
         code_typet t;
         if (get_type_description(
@@ -2351,18 +2369,11 @@ bool solidity_convertert::get_expr(
           return true;
 
         side_effect_expr_function_callt call;
-        if (get_function_call(func, t, member_decl_ref, expr, call))
+        if (get_function_call(mem_access, t, member_decl_ref, expr, call))
           return true;
 
-        // for x.func(), insert &x as the first params
-        // first, get x
-        exprt contract_var;
-        if (get_var_decl_ref(base_expr_json, contract_var))
-          return true;
-
-        // insert
-        call.arguments().at(0) = address_of_exprt(contract_var);
-
+        // set x as the fisrt param (was this pointer)
+        call.arguments().at(0) = base;
         new_expr = call;
         break;
       }
@@ -3711,6 +3722,21 @@ bool solidity_convertert::get_var_decl_ref(
     new_expr.pretty_name(name);
   }
 
+  if (decl["stateVariable"] && current_functionDecl)
+  {
+    // this means we are parsing function body
+    // and the variable is a state var
+    // data = _data ==> this->data = _data;
+
+    // get function this pointer
+    exprt this_ptr;
+    if (get_func_decl_this_ref(*current_functionDecl, this_ptr))
+      return true;
+
+    // construct member access this->data
+    new_expr = member_exprt(this_ptr, new_expr.name(), new_expr.type());
+  }
+
   return false;
 }
 
@@ -3741,6 +3767,22 @@ bool solidity_convertert::get_func_decl_ref(
   new_expr.identifier(id);
   new_expr.cmt_lvalue(true);
   new_expr.name(name);
+  return false;
+}
+bool solidity_convertert::get_func_decl_this_ref(
+  const nlohmann::json &decl,
+  exprt &new_expr)
+{
+  std::string func_name, func_id;
+  get_function_definition_name(decl, func_name, func_id);
+
+  std::string this_id = func_id + "#this";
+
+  if (context.find_symbol(this_id) == nullptr)
+    return true;
+
+  new_expr = symbol_expr(*context.find_symbol(this_id));
+
   return false;
 }
 
@@ -6528,12 +6570,21 @@ bool solidity_convertert::multi_transaction_verification(
         guard_expr);
 
       // then: function_call
+      // get func_decl_ref
       if (context.find_symbol(func_id) == nullptr)
         return true;
       const exprt func = symbol_expr(*context.find_symbol(func_id));
+
+      // get __ESBMC_tmp_ ref
+      const exprt contract_var = symbol_expr(added_ctor_symbol);
+
+      // do member access
+      exprt mem_access =
+        member_exprt(contract_var, func.identifier(), func.type());
+
       side_effect_expr_function_callt then_expr;
       if (get_function_call(
-            func,
+            mem_access,
             to_code_type(func.type()).return_type(),
             empty_json,
             empty_json,
@@ -6542,9 +6593,7 @@ bool solidity_convertert::multi_transaction_verification(
 
       // set &__ESBMC_tmp as the first argument
       // which overwrite the this pointer
-      exprt contract_var = symbol_expr(added_ctor_symbol);
-
-      then_expr.arguments().at(0) = address_of_exprt(contract_var);
+      then_expr.arguments().at(0) = contract_var;
       convert_expression_to_code(then_expr);
 
       // ifthenelse-statement:
