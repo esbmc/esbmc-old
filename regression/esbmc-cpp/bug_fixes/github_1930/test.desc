@@ -1,0 +1,5 @@
+CORE
+main.cpp
+--unwind 7
+
+^VERIFICATION SUCCESSFUL$
