@@ -31,6 +31,7 @@ solidity_convertert::solidity_convertert(
     current_functionName(""),
     current_contractName(""),
     scope_map({}),
+    initializers({}),
     tgt_func(config.options.get_option("function")),
     tgt_cnt(config.options.get_option("contract"))
 {
@@ -178,6 +179,10 @@ bool solidity_convertert::convert()
       if (add_implicit_constructor(current_contractName))
         return true;
 
+      // initialize state variable
+      if (move_initializer_to_ctor(current_contractName))
+        return true;
+
       // handling mapping_init
       if (move_mapping_to_ctor())
         return true;
@@ -190,6 +195,7 @@ bool solidity_convertert::convert()
     current_forStmt = nullptr;
     global_scope_id = 0;
     map_init_block.clear();
+    initializers.clear();
   }
 
   // Do Verification
@@ -635,7 +641,7 @@ bool solidity_convertert::get_var_decl(
   if (!has_init)
   {
     // for both state and non-state variables, set default value as zero
-    symbol.value = gen_zero(t, true);
+    symbol.value = gen_zero(get_complete_type(t, ns), true);
     symbol.value.zero_initializer(true);
   }
 
@@ -696,6 +702,10 @@ bool solidity_convertert::get_var_decl(
     added_symbol.value = val;
     decl.operands().push_back(val);
   }
+
+  // store state variable, which will be initialized in the constructor
+  if (is_state_var)
+    initializers.insert(&added_symbol);
 
   decl.location() = location_begin;
   new_expr = decl;
@@ -1073,6 +1083,43 @@ void solidity_convertert::get_temporary_object(exprt &call, exprt &new_expr)
   tmp_obj.location() = call.location();
   call.swap(tmp_obj);
   new_expr = call;
+}
+
+bool solidity_convertert::move_initializer_to_ctor(
+  const std::string contract_name,
+  std::string ctor_id)
+{
+  if (ctor_id.empty())
+  {
+    if (get_ctor_call_id(contract_name, ctor_id))
+      return true;
+
+    symbolt &sym = *context.find_symbol(ctor_id);
+
+    // get this pointer
+    std::string this_id = ctor_id + "#this";
+    if (context.find_symbol(this_id) == nullptr)
+      return true;
+    exprt base = symbol_expr(*context.find_symbol(this_id));
+
+    for (const auto &i : initializers)
+    {
+      exprt comp = symbol_expr(*i);
+      exprt lhs = member_exprt(base, comp.name(), comp.type());
+      if (i->value.id() != "nil")
+      {
+        // this stands for the symbol that has initial value
+        exprt rhs = i->value;
+        exprt _assign = side_effect_exprt("assign", comp.type());
+        _assign.copy_to_operands(lhs, rhs);
+        convert_expression_to_code(_assign);
+        // insert before the sym.value.operands
+        sym.value.operands().insert(sym.value.operands().begin(), _assign);
+      }
+    }
+  }
+
+  return false;
 }
 
 bool solidity_convertert::get_instantiation_ctor_call(

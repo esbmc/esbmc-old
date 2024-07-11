@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 #include <solidity-frontend/solidity_grammar.h>
 #include <solidity-frontend/pattern_check.h>
+#include <clang-c-frontend/symbolic_types.h>
 
 class solidity_convertert
 {
@@ -60,12 +61,16 @@ protected:
   bool get_error_definition(const nlohmann::json &ast_node);
   void add_empty_function_body(nlohmann::json &ast_node);
 
-  // handle the implicit constructor
+  // handle the constructor
   bool add_implicit_constructor(const std::string &contract_name);
   bool get_implicit_ctor_ref(exprt &new_expr, const std::string &contract_name);
   bool get_instantiation_ctor_call(
     const std::string &contract_name,
     exprt &new_expr);
+  bool move_initializer_to_ctor(
+    const std::string contract_name,
+    std::string ctor_id = "");
+
   bool
   get_struct_class_fields(const nlohmann::json &ast_node, struct_typet &type);
   bool
@@ -275,6 +280,8 @@ protected:
   std::unordered_map<std::string, std::vector<int>> linearizedBaseList;
   // Store the ast_node["id"] of contract/struct/function/...
   std::unordered_map<int, std::string> scope_map;
+  // Store state variables
+  std::unordered_set<symbolt *> initializers;
 
   static constexpr const char *mode = "C++";
 
