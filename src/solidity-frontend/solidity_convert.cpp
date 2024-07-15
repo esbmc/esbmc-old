@@ -687,7 +687,7 @@ bool solidity_convertert::get_var_decl(
       and the object will be instantiated as Base x = Base(nullptr);
     */
 
-    // 1. get constract name
+    // 1. get object-constract name
     assert(
       ast_node["typeName"]["nodeType"].get<std::string>() ==
       "UserDefinedTypeName");
@@ -1093,30 +1093,30 @@ bool solidity_convertert::move_initializer_to_ctor(
   {
     if (get_ctor_call_id(contract_name, ctor_id))
       return true;
+  }
 
-    symbolt &sym = *context.find_symbol(ctor_id);
+  symbolt &sym = *context.find_symbol(ctor_id);
 
-    // get this pointer
-    std::string this_id = ctor_id + "#this";
-    if (context.find_symbol(this_id) == nullptr)
-      return true;
-    exprt base = symbol_expr(*context.find_symbol(this_id));
+  // get this pointer
+  std::string this_id = ctor_id + "#this";
+  if (context.find_symbol(this_id) == nullptr)
+    return true;
+  exprt base = symbol_expr(*context.find_symbol(this_id));
 
-    for (const auto &i : initializers)
-    {
-      exprt comp = symbol_expr(*i);
-      exprt lhs = member_exprt(base, comp.name(), comp.type());
-      if (i->value.id() != "nil")
-      {
-        // this stands for the symbol that has initial value
-        exprt rhs = i->value;
-        exprt _assign = side_effect_exprt("assign", comp.type());
-        _assign.copy_to_operands(lhs, rhs);
-        convert_expression_to_code(_assign);
-        // insert before the sym.value.operands
-        sym.value.operands().insert(sym.value.operands().begin(), _assign);
-      }
-    }
+  for (const auto &i : initializers)
+  {
+    assert(i->value.id() != "nil");
+    exprt comp = symbol_expr(*i);
+    exprt lhs = member_exprt(base, comp.name(), comp.type());
+    exprt rhs = i->value;
+    exprt _assign = side_effect_exprt("assign", comp.type());
+
+    convert_type_expr(ns, rhs, comp.type());
+    _assign.copy_to_operands(lhs, rhs);
+
+    convert_expression_to_code(_assign);
+    // insert before the sym.value.operands
+    sym.value.operands().insert(sym.value.operands().begin(), _assign);
   }
 
   return false;
@@ -1134,7 +1134,7 @@ bool solidity_convertert::get_instantiation_ctor_call(
   code_typet type;
   typet tmp_rtn_type("constructor");
   type.return_type() = tmp_rtn_type;
-  type.set("#member_name", prefix + current_contractName);
+  type.set("#member_name", prefix + contract_name);
   type.set("copy_cons", 1);
 
   locationt location_begin;
@@ -1185,6 +1185,10 @@ bool solidity_convertert::get_instantiation_ctor_call(
   // update the param
   type.arguments().push_back(param);
   added_symbol.type = type;
+
+  // populate initializer
+  if (move_initializer_to_ctor(contract_name, id))
+    return true;
 
   // 2. construct the ctor call
   if (get_constructor_call(contract_name, id, new_expr))
@@ -2306,44 +2310,53 @@ bool solidity_convertert::get_expr(
   }
   case SolidityGrammar::ExpressionT::CallExprClass:
   {
+    side_effect_expr_function_callt call;
     const nlohmann::json &callee_expr_json = expr["expression"];
 
-    // 0. check if it's a solidity built-in function
+    // * we first do special cases handling
+    // * check if it's a solidity built-in function
     if (
-      !get_sol_builtin_ref(expr, new_expr) &&
-      !check_intrinsic_function(callee_expr_json))
+      !get_esbmc_builtin_ref(callee_expr_json, new_expr) ||
+      !get_sol_builtin_ref(expr, new_expr))
     {
-      // construct call
       typet type = to_code_type(new_expr.type()).return_type();
-
-      side_effect_expr_function_callt call;
       call.function() = new_expr;
       call.type() = type;
 
-      // populate params
-      // the number of arguments defined in the template
-      size_t define_size = to_code_type(new_expr.type()).arguments().size();
-      // the number of arguments actually inside the json file
-      const size_t arg_size = expr["arguments"].size();
-      if (define_size >= arg_size)
+      if (
+        new_expr.type().get("#sol_name").as_string().find("revert") !=
+        std::string::npos)
       {
-        // we only populate the exact number of args according to the template
-        for (const auto &arg : expr["arguments"].items())
-        {
-          exprt single_arg;
-          if (get_expr(
-                arg.value(), arg.value()["typeDescriptions"], single_arg))
-            return true;
-
-          call.arguments().push_back(single_arg);
-        }
+        // Special case: revert
+        // insert a bool false as the first argument.
+        // drop the rest of params.
+        call.arguments().push_back(false_exprt());
+      }
+      else if (
+        new_expr.type().get("#sol_name").as_string().find("require") !=
+        std::string::npos)
+      {
+        // Special case: require
+        // __ESBMC_assume only handle one param.
+        exprt single_arg;
+        if (get_expr(
+              expr["arguments"].at(0),
+              expr["arguments"].at(0)["typeDescriptions"],
+              single_arg))
+          return true;
+        call.arguments().push_back(single_arg);
+      }
+      else
+      {
+        if (get_function_call(new_expr, type, empty_json, expr, call))
+          return true;
       }
 
       new_expr = call;
       break;
     }
 
-    // 1. Get callee expr
+    // * check if it's a member access call
     if (
       callee_expr_json.contains("nodeType") &&
       callee_expr_json["nodeType"] == "MemberAccess")
@@ -2415,12 +2428,9 @@ bool solidity_convertert::get_expr(
               member_decl_ref["returnParameters"], t.return_type()))
           return true;
 
-        side_effect_expr_function_callt call;
         if (get_function_call(mem_access, t, member_decl_ref, expr, call))
           return true;
 
-        // set x as the fisrt param (was this pointer)
-        call.arguments().at(0) = base;
         new_expr = call;
         break;
       }
@@ -2443,8 +2453,7 @@ bool solidity_convertert::get_expr(
     if (get_expr(implicit_cast_expr, callee_expr))
       return true;
 
-    // 2. Get type
-    // extract from the return_type
+    // * check if it's a struct call
     assert(callee_expr.is_symbol());
     if (expr["kind"] == "structConstructorCall")
     {
@@ -2482,44 +2491,27 @@ bool solidity_convertert::get_expr(
       break;
     }
 
+    // * we had ruled out all the special cases
+    // * we now confirm it is called by aother contract inside current contract
+    // * func() ==> current_func_this.func(&current_func_this);
+
     // funciton call expr
     assert(callee_expr.type().is_code());
     typet type = to_code_type(callee_expr.type()).return_type();
 
-    side_effect_expr_function_callt call;
-    call.function() = callee_expr;
-    call.type() = type;
-    if (
-      callee_expr.type().get("#sol_name").as_string().find("revert") !=
-      std::string::npos)
-    {
-      // special case: revert
-      // insert a bool false as the first argument.
-      // drop the rest of params.
-      call.arguments().push_back(false_exprt());
-    }
-    else if (
-      callee_expr.type().get("#sol_name").as_string().find("require") !=
-      std::string::npos)
-    {
-      // Special case: require
-      // __ESBMC_assume only handle one param.
+    const auto &caller_expr_json =
+      find_decl_ref(callee_expr_json["referencedDeclaration"].get<int>());
 
-      exprt single_arg;
-      if (get_expr(
-            expr["arguments"].at(0),
-            expr["arguments"].at(0)["typeDescriptions"],
-            single_arg))
-        return true;
-      call.arguments().push_back(single_arg);
-    }
-    else
-    {
-      const auto &caller_expr_json =
-        find_decl_ref(callee_expr_json["referencedDeclaration"].get<int>());
-      if (get_function_call(callee_expr, type, caller_expr_json, expr, call))
-        return true;
-    }
+    exprt base;
+    assert(current_functionDecl);
+    if (get_func_decl_this_ref(*current_functionDecl, base))
+      return true;
+
+    exprt mem_access =
+      member_exprt(base, callee_expr.identifier(), callee_expr.type());
+
+    if (get_function_call(mem_access, type, caller_expr_json, expr, call))
+      return true;
 
     new_expr = call;
     break;
@@ -3856,16 +3848,28 @@ bool solidity_convertert::get_esbmc_builtin_ref(
   // Function to configure new_expr that has a -ve referenced id
   // -ve ref id means built-in functions or variables.
   // Add more special function names here
+  if (
+    decl.contains("referencedDeclaration") &&
+    decl["referencedDeclaration"].get<int>() >= 0)
+    return true;
 
-  assert(decl.contains("name"));
+  if (!decl.contains("name"))
+    return get_sol_builtin_ref(decl, new_expr);
+
   const std::string blt_name = decl["name"].get<std::string>();
   std::string name, id;
 
   // "require" keyword is virtually identical to "assume"
   if (blt_name == "require" || blt_name == "revert")
     name = "__ESBMC_assume";
-  else
+  else if (
+    blt_name == "assert" || name == "__ESBMC_assert" ||
+    name == "__VERIFIER_asert" || name == "__ESBMC_assume" ||
+    name == "__VERIFIER_assume")
     name = blt_name;
+  else
+    //!assume it's a solidity built-in func
+    return get_sol_builtin_ref(decl, new_expr);
   id = name;
 
   // manually unrolled recursion here
@@ -3874,24 +3878,16 @@ bool solidity_convertert::get_esbmc_builtin_ref(
   // Creat a new code_typet, parse the return_type and copy the code_typet to typet
   code_typet convert_type;
   typet return_type;
-  if (
-    name == "assert" || name == "__ESBMC_assume" || name == "__VERIFIER_assume")
-  {
-    // clang's assert(.) uses "signed_int" as assert(.) type (NOT the argument type),
-    // while Solidity's assert uses "bool" as assert(.) type (NOT the argument type).
-    return_type = bool_type();
-    std::string c_type = "bool";
-    return_type.set("#cpp_type", c_type);
-    convert_type.return_type() = return_type;
 
-    if (!convert_type.arguments().size())
-      convert_type.make_ellipsis();
-  }
-  else
-  {
-    //!assume it's a solidity built-in func
-    return get_sol_builtin_ref(decl, new_expr);
-  }
+  // clang's assert(.) uses "signed_int" as assert(.) type (NOT the argument type),
+  // while Solidity's assert uses "bool" as assert(.) type (NOT the argument type).
+  return_type = bool_type();
+  std::string c_type = "bool";
+  return_type.set("#cpp_type", c_type);
+  convert_type.return_type() = return_type;
+
+  if (!convert_type.arguments().size())
+    convert_type.make_ellipsis();
 
   type = convert_type;
   type.set("#sol_name", blt_name);
@@ -5107,6 +5103,9 @@ bool solidity_convertert::get_elementary_type_name(
 
     new_type = unsignedbv_typet(160);
 
+    // avoid alignment checking failure
+    new_type.set("alignment", constant_exprt(32, unsignedbv_typet(256)));
+
     // for type conversion
     new_type.set("#sol_type", elementary_type_name_to_str(type));
     new_type.set("#sol_type", "ADDRESS");
@@ -6100,7 +6099,11 @@ bool solidity_convertert::is_mapping(const nlohmann::json &ast_node)
     * @param type: return type
     * @param decl_ref: the function declaration node
     * @param expr: the function caller node
-    if decl_ref or expr is empty, we will set the arguements as nil.
+    For this pointer:
+    - if the function is called by aother contract inside current contract
+      func() ==> this_func.func(&this_func,)
+    - if the function is called via temporary object in another contract 
+      x.func() ==> x.func(&x,)
 **/
 bool solidity_convertert::get_function_call(
   const exprt &func,
@@ -6117,86 +6120,112 @@ bool solidity_convertert::get_function_call(
   // populate params
   if (decl_ref.empty() && !expr.empty())
   {
+    // * Assume it is a solidity built in function, which we cannot find the declartion
+    // * in the json_node, thus the decl_ref left emtpy
+
+    nlohmann::json param = nullptr;
     // for builtin functions which have no this pointer
     for (const auto &arg : expr["arguments"].items())
     {
       exprt single_arg;
-      if (get_expr(arg.value(), arg.value()["typeDescriptions"], single_arg))
+      if (arg.value().contains("commonType"))
+        param = arg.value()["commonType"];
+      else if (arg.value().contains("typeDescriptions"))
+        param = arg.value()["typeDescriptions"];
+
+      if (get_expr(arg.value(), param, single_arg))
         return true;
 
       call.arguments().push_back(single_arg);
+      param = nullptr;
     }
   }
-  else
+  else if (!decl_ref.empty() && !expr.empty())
   {
-    assert(func.type().is_code());
-    assert(to_code_type(func.type()).arguments().size() > 0);
-    const auto tmp_arg = to_code_type(func.type()).arguments().at(0);
-    if (expr.empty())
-    {
-      /*
-    get this pointer
-      0: address_of
-        * type: pointer
-          * subtype: symbol
-              * identifier: tag-BB
-        * operands: 
-        0: new_object
-            * type: symbol
-                * identifier: tag-BB
-            * #lvalue: 1
-    */
+    // * Assume it is a normal funciton call
 
+    // set caller object as the first argument
+    exprt this_object;
+    if ((func.id() == "member"))
+      this_object = func.op0();
+    else if (
+      func.type().is_code() && to_code_type(func.type()).arguments().size() > 0)
+    {
+      const auto tmp_arg = to_code_type(func.type()).arguments().at(0);
       assert(tmp_arg.get("#base_name").as_string() == "this");
       exprt temporary = exprt("new_object");
       temporary.set("#lvalue", true);
       temporary.type() = tmp_arg.type().subtype();
-      assert(temporary.type().is_symbol());
-      address_of_exprt this_object(temporary);
-      code_typet tmp = to_code_type(func.type());
-
-      // populate nil arguements
-      call.arguments().resize(
-        tmp.arguments().size(), static_cast<const exprt &>(get_nil_irep()));
-      // set this
-      call.arguments().at(0) = this_object;
+      this_object = temporary;
     }
     else
     {
-      if (tmp_arg.get("#base_name").as_string() == "this")
-      {
-        exprt temporary = exprt("new_object");
-        temporary.set("#lvalue", true);
-        temporary.type() = tmp_arg.type().subtype();
-        assert(temporary.type().is_symbol());
-        address_of_exprt this_object(temporary);
-        call.arguments().push_back(this_object);
-      }
-      nlohmann::json param_nodes = decl_ref["parameters"]["parameters"];
-      unsigned num_args = 0;
-      nlohmann::json param = nullptr;
-      nlohmann::json::iterator itr = param_nodes.begin();
-
-      for (const auto &arg : expr["arguments"].items())
-      {
-        if (itr != param_nodes.end())
-        {
-          if ((*itr).contains("typeDescriptions"))
-          {
-            param = (*itr)["typeDescriptions"];
-          }
-          ++itr;
-        }
-
-        exprt single_arg;
-        if (get_expr(arg.value(), param, single_arg))
-          return true;
-
-        call.arguments().push_back(single_arg);
-        ++num_args;
-        param = nullptr;
-      }
+      log_error("Unexpected function call scheme");
+      return true;
     }
+    call.arguments().push_back(this_object);
+
+    nlohmann::json param_nodes = decl_ref["parameters"]["parameters"];
+    unsigned num_args = 0;
+    nlohmann::json param = nullptr;
+    nlohmann::json::iterator itr = param_nodes.begin();
+
+    for (const auto &arg : expr["arguments"].items())
+    {
+      if (itr != param_nodes.end())
+      {
+        if ((*itr).contains("typeDescriptions"))
+        {
+          param = (*itr)["typeDescriptions"];
+        }
+        ++itr;
+      }
+
+      exprt single_arg;
+      if (get_expr(arg.value(), param, single_arg))
+        return true;
+
+      call.arguments().push_back(single_arg);
+      ++num_args;
+      param = nullptr;
+    }
+  }
+  else if (decl_ref.empty() && expr.empty())
+  {
+    // * assume this is constructor call we manually setup
+    // * during the multi-transaction verification
+
+    /*
+      get this pointer
+        0: address_of
+          * type: pointer
+            * subtype: symbol
+                * identifier: tag-BB
+          * operands: 
+          0: new_object
+              * type: symbol
+                  * identifier: tag-BB
+              * #lvalue: 1
+    */
+    assert(to_code_type(func.type()).arguments().size() > 0);
+    const auto tmp_arg = to_code_type(func.type()).arguments().at(0);
+    assert(tmp_arg.get("#base_name").as_string() == "this");
+    exprt temporary = exprt("new_object");
+    temporary.set("#lvalue", true);
+    temporary.type() = tmp_arg.type().subtype();
+    address_of_exprt this_object(temporary);
+    code_typet tmp = to_code_type(func.type());
+
+    // populate nil arguements
+    call.arguments().resize(
+      tmp.arguments().size(), static_cast<const exprt &>(get_nil_irep()));
+    // set this
+    call.arguments().at(0) = this_object;
+  }
+  else
+  {
+    log_error("Unexpected function call scheme");
+    return true;
   }
 
   return false;
