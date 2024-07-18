@@ -56,6 +56,11 @@ OPT2FLAGS = {
     '--gcse'             : {'gcse'},
 }
 
+ARGOPTS2FLAGS = {
+    '--default-solver': {'default-solver=*'},
+    '--std'           : {'std=*'},
+}
+
 BUG = 'bug'
 
 FLAG_DESC = {}
@@ -91,6 +96,8 @@ def list_flags(verbosity : int):
     flgs = {BUG} | EXTENSIONS.keys()
     for v in OPT2FLAGS.values():
         flgs |= v
+    for v in ARGOPTS2FLAGS.values():
+        flgs |= v
     # output
     if verbosity > 0:
         max_w = max(len(f) for f in flgs)
@@ -106,19 +113,31 @@ def flags(tc : TestCase):
     r = set()
     if tc.test_mode in FAIL_MODES:
         r.add(Flag(BUG))
-    opts = tc.generate_run_argument_list('true')[1:]
-    for opt in opts:
-        f = set()
-        if os.path.exists(opt) and os.path.isfile(os.path.realpath(opt)):
+    opts = []
+    for arg in tc.generate_run_argument_list('true')[1:]:
+        if os.path.exists(arg) and os.path.isfile(os.path.realpath(arg)):
             # probably an input file
-            ext = opt[opt.rfind('.') + 1:]
+            ext = arg[arg.rfind('.') + 1:]
             for lang, exts in EXTENSIONS.items():
                 if ext in exts:
-                    f = {Flag(lang)}
+                    r |= {Flag(lang)}
                     break
         else:
-            # not a file, so it's an option
+            # not a file, so it's an option; split options containing '='
+            eq = arg.find('=')
+            if eq != -1:
+                opts.append(arg[:eq])
+            opts.append(arg[eq + 1:])
+    i = 0
+    while i < len(opts):
+        f = set()
+        opt = opts[i]
+        if opt in ARGOPTS2FLAGS: # option requires an argument
+            f = {Flag(g.replace('*', opts[i+1])) for g in ARGOPTS2FLAGS[opt]}
+            i += 2
+        else:
             f = {Flag(g) for g in OPT2FLAGS.get(opt, f)}
+            i += 1
         # add all the new flags to the ones we already accumulated
         r |= f
     return r

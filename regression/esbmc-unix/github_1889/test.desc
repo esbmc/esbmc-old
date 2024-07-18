@@ -1,0 +1,4 @@
+CORE
+main.c
+--no-unwinding-assertions --unwind 2 -Wno-error=implicit-function-declaration
+^VERIFICATION FAILED$

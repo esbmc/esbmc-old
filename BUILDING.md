@@ -1,15 +1,3 @@
-# TLDR
-
-To compile ESBMC on Ubuntu 24.04 with LLVM 14 and Z3:
-
-```
-sudo apt install clang-14 llvm-14 clang-tidy-14 python-is-python3 python3 git ccache unzip wget curl bison flex g++-multilib linux-libc-dev libboost-all-dev libz3-dev libclang-14-dev libclang-cpp-dev cmake
-git clone https://github.com/esbmc/esbmc.git
-mkdir build && cd build
-cmake .. -DENABLE_Z3=1
-make -j4
-```
-
 # ESBMC Static Build Guide
 
 This is a guide on how to build ESBMC and its supported solvers.
@@ -33,7 +21,7 @@ Before starting, note that ESBMC is mainly distributed under the terms of the [A
 | MathSAT   | no       | 5.5.4           |
 | Yices     | no       | 2.6.4           |
 | Z3        | no       | 4.8.9           |
-| Bitwuzla  | no       | 0.3.1           |
+| Bitwuzla  | no       | 0.5.0           |
 
 The version requirements are stable but can change between releases.
 
@@ -293,7 +281,7 @@ We have wrapped the entire build and setup of Bitwuzla in the following command:
 
 ```
 Linux/macOS:
-git clone --depth=1 --branch=0.3.1 https://github.com/bitwuzla/bitwuzla.git && cd bitwuzla && ./configure.py --prefix $PWD/../bitwuzla-release && cd build && meson install
+git clone --depth=1 --branch=0.5.0 https://github.com/bitwuzla/bitwuzla.git && cd bitwuzla && ./configure.py --prefix $PWD/../bitwuzla-release && cd build && meson install
 ```
 
 For more details on Bitwuzla, please refer to [its Github](https://github.com/bitwuzla/bitwuzla).
@@ -428,5 +416,7 @@ passing the CMake flags
 -DESBMC_CHERI_HYBRID_SYSROOT=<path> -DESBMC_CHERI_PURECAP_SYSROOT=<path>
 ```
 e.g. the 'path' should point to `$HOME/cheri/output/rootfs-riscv64-purecap`. As for the `rootfs-riscv64-purecap` part, you may want to use a diffrent directory if you used a different variant in the `cheribuild.py` command above.
+
+
 
 

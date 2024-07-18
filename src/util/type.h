@@ -187,4 +187,5 @@ bool is_number(const typet &type);
  * @return false
  */
 bool is_array_like(const typet &type);
+
 #endif

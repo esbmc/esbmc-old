@@ -25,3 +25,14 @@ class int:
        result:int = result - (1 << (8 * len(bytes_data)))
 
     return result
+
+  @classmethod
+  # bit_lenght() count the bits needed to represent an integer in binary
+  def bit_length(cls, n:int) -> int:
+    length:int = 0
+
+    while n > 0:
+        n:int = n >> 1
+        length:int = length + 1  # Count how many times the number is shifted
+
+    return length

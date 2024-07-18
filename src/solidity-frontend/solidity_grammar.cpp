@@ -551,13 +551,11 @@ BlockT get_block_t(const nlohmann::json &block)
   {
     return BlockExpressionStatement;
   }
-  else
-  {
-    log_error(
-      "Got block nodeType={}. Unsupported block type",
-      block["nodeType"].get<std::string>());
-    abort();
-  }
+
+  // fall-through
+  log_error(
+    "Got block nodeType={}. Unsupported block type",
+    block["nodeType"].get<std::string>());
   return BlockTError;
 }
 
@@ -735,13 +733,11 @@ ExpressionT get_expression_t(const nlohmann::json &expr)
   {
     return IndexAccess;
   }
-  else
-  {
-    log_error(
-      "Got expression nodeType={}. Unsupported expression type",
-      expr["nodeType"].get<std::string>());
-    abort();
-  }
+
+  // fall-through
+  log_error(
+    "Got expression nodeType={}. Unsupported expression type",
+    expr["nodeType"].get<std::string>());
   return ExpressionTError;
 }
 

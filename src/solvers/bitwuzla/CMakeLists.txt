@@ -10,7 +10,7 @@ else()
             NAME bitwuzla
             DOWNLOAD_ONLY YES
             GITHUB_REPOSITORY bitwuzla/bitwuzla
-            GIT_TAG 0.3.1)
+            GIT_TAG 0.5.0)
 	  
 	  message("[bitwuzla] Source-dir: ${bitwuzla_SOURCE_DIR} ")
         message("[bitwuzla] Configuring project:  ./configure.py --prefix ${bitwuzla_BINARY_DIR}")

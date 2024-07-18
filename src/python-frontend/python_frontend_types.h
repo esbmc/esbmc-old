@@ -47,4 +47,7 @@ bool is_consensus_type(const std::string &name);
 
 bool is_consensus_func(const std::string &name);
 
+// Check if a function is defined in the "models" folder
+bool is_model_func(const std::string &name);
+
 std::string get_type_from_consensus_func(const std::string &name);

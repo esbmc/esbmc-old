@@ -1,0 +1,4 @@
+CORE
+main.c 
+--multi-property --k-induction --k-step 3
+^VERIFICATION FAILED$

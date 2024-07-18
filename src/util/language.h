@@ -18,24 +18,8 @@ public:
   // parse file
   virtual bool parse(const std::string &path) = 0;
 
-  // add external dependencies of a given module to set
-  virtual void dependencies()
-  {
-  }
-
-  // add modules provided by currently parsed file to set
-  virtual void modules_provided(std::set<std::string> &)
-  {
-  }
-
   // final adjustments, e.g., initialization and call to main()
   virtual bool final(contextt &)
-  {
-    return false;
-  }
-
-  // type check interfaces of currently parsed file
-  virtual bool interfaces()
   {
     return false;
   }

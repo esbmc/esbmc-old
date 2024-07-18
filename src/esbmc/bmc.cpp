@@ -25,6 +25,7 @@
 #include <goto-symex/goto_trace.h>
 #include <goto-symex/reachability_tree.h>
 #include <goto-symex/slice.h>
+#include <goto-symex/features.h>
 #include <goto-symex/xml_goto_trace.h>
 #include <langapi/language_util.h>
 #include <langapi/languages.h>
@@ -64,6 +65,9 @@ bmct::bmct(goto_functionst &funcs, optionst &opts, contextt &_context)
       // Store the set between runs
       algorithms.emplace_back(std::make_unique<assertion_cache>(
         config.ssa_caching_db, !options.get_bool_option("forward-condition")));
+
+    if (opts.get_bool_option("ssa-features-dump"))
+      algorithms.emplace_back(std::make_unique<ssa_features>());
   }
 
   if (options.get_bool_option("smt-during-symex"))
@@ -791,6 +795,11 @@ smt_convt::resultt bmct::multi_property_check(
                      options.get_bool_option("condition-coverage-claims") ||
                      options.get_bool_option("condition-coverage-rm") ||
                      options.get_bool_option("condition-coverage-claims-rm");
+  bool is_keep_verified = options.get_bool_option("keep-verified-claims");
+  bool is_clear_verified = (options.get_bool_option("k-induction") ||
+                            options.get_bool_option("incremental-bmc") ||
+                            options.get_bool_option("k-induction-parallel")) &&
+                           !is_keep_verified;
   // For multi-fail-fast
   const std::string fail_fast = options.get_option("multi-fail-fast");
   const bool is_fail_fast = !fail_fast.empty() ? true : false;
@@ -827,6 +836,8 @@ smt_convt::resultt bmct::multi_property_check(
                        &reached_mul_claims,
                        &is_assert_cov,
                        &is_cond_cov,
+                       &is_keep_verified,
+                       &is_clear_verified,
                        &is_fail_fast,
                        &fail_fast_limit,
                        &fail_fast_cnt](const size_t &i) {
@@ -847,42 +858,39 @@ smt_convt::resultt bmct::multi_property_check(
     // to avoid double verifying the claims that are already verified
     bool is_verified = false;
     std::string cmt_loc;
+    cmt_loc = claim.claim_msg + "\t" + claim.claim_loc;
     if (is_assert_cov)
-    {
-      cmt_loc = claim.claim_msg + "\t" + claim.claim_loc;
       // C++20 reached_mul_claims.contains
       is_verified = reached_mul_claims.count(cmt_loc) ? true : false;
-    }
     else
-    {
-      cmt_loc = claim.claim_msg + "\t" + claim.claim_loc;
       is_verified = reached_claims.count(cmt_loc) ? true : false;
-    }
     if (is_assert_cov && is_verified)
       // insert to the multiset before skipping the verification process
       reached_mul_claims.emplace(cmt_loc);
-    if (is_verified && !options.get_bool_option("keep-verified-claims"))
+    if (is_verified && !is_keep_verified)
       return;
 
     // Slice
     symex_slicet slicer(options);
     slicer.run(local_eq.SSA_steps);
 
+    if (options.get_bool_option("ssa-features-dump"))
+    {
+      ssa_features features;
+      features.run(local_eq.SSA_steps);
+    }
+
     // Initialize a solver
     std::unique_ptr<smt_convt> runtime_solver(create_solver("", ns, options));
-    // Save current instance
-    generate_smt_from_equation(*runtime_solver, local_eq);
 
     log_status(
       "Solving claim '{}' with solver {}",
       claim.claim_msg,
       runtime_solver->solver_text());
 
-    fine_timet sat_start = current_time();
-    smt_convt::resultt result = runtime_solver->dec_solve();
-    fine_timet sat_stop = current_time();
-    log_status(
-      "Runtime decision procedure: {}s", time2string(sat_stop - sat_start));
+    // Save current instance
+    smt_convt::resultt result =
+      run_decision_procedure(*runtime_solver, local_eq);
 
     // If an assertion instance is verified to be violated
     if (result == smt_convt::P_SATISFIABLE)
@@ -917,6 +925,26 @@ smt_convt::resultt bmct::multi_property_check(
 
       // Update fail-fast-counter
       fail_fast_cnt++;
+
+      // for kind && incr: remove verified claims
+      if (is_clear_verified)
+      {
+        for (auto &it : symex->goto_functions.function_map)
+        {
+          for (auto &instruction : it.second.body.instructions)
+          {
+            if (
+              instruction.is_assert() &&
+              from_expr(ns, "", instruction.guard) == claim.claim_msg &&
+              instruction.location.as_string() == claim.claim_loc)
+            {
+              // convert ASSERT to SKIP
+              instruction.make_skip();
+              break;
+            }
+          }
+        }
+      }
     }
   };
 

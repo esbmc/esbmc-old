@@ -159,8 +159,7 @@ public:
 
   cvc5::Solver slv;
 
-  typedef std::unordered_map<std::string, smt_astt> symtable_type;
-  symtable_type symtable;
+  symtabt symtable;
 };
 
 #endif /* _ESBMC_SOLVERS_CVC_CVC_CONV_H_ */

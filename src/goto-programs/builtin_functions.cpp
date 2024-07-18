@@ -863,6 +863,27 @@ void goto_convertt::do_function_call_symbol(
       t->location = function.location();
     }
   }
+  // Nontemporal means "do not cache please" (https://lwn.net/Articles/255364/)
+  else if (base_name == "__builtin_nontemporal_load")
+  {
+    // T __builtin_nontemporal_load(T *addr);
+    if (arguments.size() != 1)
+    {
+      log_error("`{}' expected to have one argument", id2string(base_name));
+      abort();
+    }
+
+    goto_programt::targett t_n = dest.add_instruction(ASSIGN);
+
+    exprt deref("dereference", lhs.type());
+    deref.copy_to_operands(arguments[0]);
+
+    exprt new_assign = code_assignt(lhs, deref);
+    expr2tc new_assign_expr;
+    migrate_expr(new_assign, new_assign_expr);
+    t_n->code = new_assign_expr;
+    t_n->location = function.location();
+  }
   else
   {
     // insert function call

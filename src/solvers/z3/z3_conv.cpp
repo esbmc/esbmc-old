@@ -1,4 +1,3 @@
-#include <cassert>
 #include <iostream> /* std::cout */
 #include <z3_conv.h>
 

@@ -863,4 +863,28 @@ inline smt_ast::smt_ast(smt_convt *ctx, smt_sortt s) : sort(s), context(ctx)
   ctx->live_asts.push_back(this);
 }
 
+/* Type for push/pop-aware symbol table cache, required by some solvers */
+
+struct symtab_entryt
+{
+  std::string val;
+  smt_astt ast;
+  unsigned int level;
+
+  symtab_entryt(std::string val, smt_astt ast, unsigned int level)
+    : val(std::move(val)), ast(ast), level(level)
+  {
+  }
+};
+
+typedef boost::multi_index_container<
+  symtab_entryt,
+  boost::multi_index::indexed_by<
+    boost::multi_index::hashed_unique<
+      BOOST_MULTI_INDEX_MEMBER(symtab_entryt, std::string, val)>,
+    boost::multi_index::ordered_non_unique<
+      BOOST_MULTI_INDEX_MEMBER(symtab_entryt, unsigned int, level),
+      std::greater<unsigned int>>>>
+  symtabt;
+
 #endif /* _ESBMC_PROP_SMT_SMT_CONV_H_ */

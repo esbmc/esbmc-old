@@ -1,6 +1,6 @@
 CORE
 main.c
---goto-unwind --assertion-coverage --k-induction
+--goto-unwind --assertion-coverage
 ^Total Asserts: 8
 ^Total Assertion Instances: 8
 ^VERIFICATION FAILED$

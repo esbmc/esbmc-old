@@ -107,8 +107,7 @@ public:
   // Members
   Btor *btor;
 
-  typedef std::unordered_map<std::string, smt_astt> symtable_type;
-  symtable_type symtable;
+  symtabt symtable;
 };
 
 #endif /* _ESBMC_SOLVERS_BOOLECTOR_BOOLECTOR_CONV_H_ */

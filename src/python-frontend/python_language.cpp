@@ -5,6 +5,7 @@
 #include <util/message.h>
 #include <util/filesystem.h>
 #include <util/c_expr2string.h>
+#include <c2goto/cprover_library.h>
 
 #include <cstdlib>
 #include <fstream>
@@ -102,15 +103,16 @@ bool python_languaget::parse(const std::string &path)
   return false;
 }
 
-bool python_languaget::final(contextt & /*context*/)
+bool python_languaget::final(contextt &)
 {
   return false;
 }
 
-bool python_languaget::typecheck(
-  contextt &context,
-  const std::string & /*module*/)
+bool python_languaget::typecheck(contextt &context, const std::string &)
 {
+  // Load c models
+  add_cprover_library(context, this);
+
   python_converter converter(context, ast);
   if (converter.convert())
     return true;

@@ -2,6 +2,7 @@
 // Remove warnings from Clang headers
 CC_DIAGNOSTIC_PUSH()
 CC_DIAGNOSTIC_IGNORE_LLVM_CHECKS()
+#include <clang/AST/ASTImporter.h>
 #include <clang/Basic/Version.inc>
 #include <clang/Driver/Compilation.h>
 #include <clang/Driver/Driver.h>
@@ -135,4 +136,34 @@ std::unique_ptr<clang::ASTUnit> buildASTs(
   delete (action);
 
   return unit;
+}
+
+void mergeASTs(
+  const std::unique_ptr<clang::ASTUnit> &FromUnit,
+  std::unique_ptr<clang::ASTUnit> &ToUnit)
+{
+  // Call enableSourceFileDiagnostics on the
+  // ASTUnit objects to get diagnostics.
+  FromUnit->enableSourceFileDiagnostics();
+  ToUnit->enableSourceFileDiagnostics();
+
+  clang::ASTImporter Importer(
+    ToUnit->getASTContext(),
+    ToUnit->getFileManager(),
+    FromUnit->getASTContext(),
+    FromUnit->getFileManager(),
+    false);
+
+  Importer.setODRHandling(clang::ASTImporter::ODRHandlingType::Liberal);
+
+  for (auto decl : FromUnit->getASTContext().getTranslationUnitDecl()->decls())
+  {
+    llvm::Expected<clang::Decl *> ImportedOrErr = Importer.Import(decl);
+    if (!ImportedOrErr)
+    {
+      llvm::Error Err = ImportedOrErr.takeError();
+      llvm::errs() << "Error: " << Err << "\n";
+      consumeError(std::move(Err));
+    }
+  }
 }

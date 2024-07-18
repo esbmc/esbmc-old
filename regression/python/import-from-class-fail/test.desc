@@ -1,4 +1,4 @@
 CORE
 main.py
 
-Assertion `!ref\.empty\(\)' failed\.\s*$
+ERROR: Type undefined for:\s*$

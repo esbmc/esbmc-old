@@ -9,7 +9,7 @@ pattern_checker::pattern_checker(
 {
 }
 
-bool pattern_checker::do_pattern_check()
+void pattern_checker::do_pattern_check()
 {
   // TODO: add more functions here to perform more pattern-based checks
 
@@ -30,7 +30,7 @@ bool pattern_checker::do_pattern_check()
         if (target_func != "")
         {
           log_progress("Checking function {} ...", target_func.c_str());
-          return start_pattern_based_check(*itr);
+          start_pattern_based_check(*itr);
         }
         else
         {
@@ -38,23 +38,20 @@ bool pattern_checker::do_pattern_check()
           log_progress(
             "Checking function {} ...",
             (*itr)["name"].get<std::string>().c_str());
-          if (start_pattern_based_check(*itr))
-            return true;
+          start_pattern_based_check(*itr);
         }
       }
     }
   }
-
-  return false;
 }
 
-bool pattern_checker::start_pattern_based_check(const nlohmann::json &func)
+void pattern_checker::start_pattern_based_check(const nlohmann::json &func)
 {
   // SWC-115: Authorization through tx.origin
-  check_authorization_through_tx_origin(func);
-  return false;
+  // In interface and abstract functions, there is no body
+  if (func.contains("body") && !func["body"].empty())
+    check_authorization_through_tx_origin(func);
 }
-
 void pattern_checker::check_authorization_through_tx_origin(
   const nlohmann::json &func)
 {

@@ -28,9 +28,9 @@ CC_DIAGNOSTIC_POP()
 
 clang_cpp_convertert::clang_cpp_convertert(
   contextt &_context,
-  std::vector<std::unique_ptr<clang::ASTUnit>> &_ASTs,
+  std::unique_ptr<clang::ASTUnit> &_AST,
   irep_idt _mode)
-  : clang_c_convertert(_context, _ASTs, _mode)
+  : clang_c_convertert(_context, _AST, _mode)
 {
 }
 
@@ -1118,85 +1118,128 @@ bool clang_cpp_convertert::get_function_body(
     const clang::CXXConstructorDecl &cxxcd =
       static_cast<const clang::CXXConstructorDecl &>(fd);
 
+    log_debug(
+      "c++",
+      "Class {} ctor {} has {} initializers",
+      cxxcd.getParent()->getNameAsString(),
+      cxxcd.getNameAsString(),
+      cxxcd.getNumCtorInitializers());
+
+    // Resize the number of operands
+    exprt::operandst initializers;
+    initializers.reserve(cxxcd.getNumCtorInitializers());
+
     // Parse the initializers, if any
-    if (cxxcd.init_begin() != cxxcd.init_end())
+
+    // `init` type is clang::CXXCtorInitializer
+    for (auto init : cxxcd.inits())
     {
-      log_debug(
-        "c++",
-        "Class {} ctor {} has {} initializers",
-        cxxcd.getParent()->getNameAsString(),
-        cxxcd.getNameAsString(),
-        cxxcd.getNumCtorInitializers());
+      exprt initializer;
 
-      // Resize the number of operands
-      exprt::operandst initializers;
-      initializers.reserve(cxxcd.getNumCtorInitializers());
-
-      // `init` type is clang::CXXCtorInitializer
-      for (auto init : cxxcd.inits())
+      if (init->isDelegatingInitializer())
       {
-        exprt initializer;
+        /* The "A(1)" initializer here is a delegating initializer.
+         * There can only be one initializer in that case.
+         *
+         * struct A {
+         *   A() : A(1) {}
+         *   A(int);
+         * }
+         */
+        assert(cxxcd.getNumCtorInitializers() == 1);
 
-        if (!init->isBaseInitializer())
+        initializer.set(
+          "#delegating_ctor_this", ftype.arguments().at(0).get("#identifier"));
+        initializer.set("#delegating_ctor", 1);
+        if (get_expr(*init->getInit(), initializer))
+          return true;
+      }
+      else if (init->isBaseInitializer())
+      {
+        // Add additional annotation for `this` parameter
+        initializer.derived_this_arg(
+          ftype.arguments().at(0).get("#identifier"));
+        initializer.base_ctor_derived(true);
+        if (get_expr(*init->getInit(), initializer))
+          return true;
+      }
+      else if (init->isMemberInitializer())
+      {
+        // parsing non-static member initializer
+
+        exprt member;
+        member.set("#member_init", 1);
+        if (get_decl_ref(*init->getMember(), member))
+          return true;
+
+        build_member_from_component(fd, member);
+        // set #member_init flag again, as it has been cleared between the first call...
+        member.set("#member_init", 1);
+
+        exprt rhs;
+        rhs.set("#member_init", 1);
+        if (get_expr(*init->getInit(), rhs))
+          return true;
+
+        /* We can't assign to arrays, dereference() will choke. */
+        if (is_array_like(member.type()))
         {
-          if (init->isMemberInitializer())
+          /* Instead, create a constant expression of the class's type, where
+           * each component, except for the one referred to in 'lhs', just is a
+           * member expression into (*this). Then assign this new expression
+           * to (*this). */
+          const exprt &this_ptr = member.op0(); /* the (this) pointer */
+          const struct_union_typet &this_type =
+            to_struct_union_type(ns.follow(this_ptr.type().subtype()));
+          bool is_struct = this_type.is_struct();
+          exprt rhs_sym(is_struct ? "struct" : "union", this_type);
+          if (is_struct)
           {
-            exprt lhs;
-            lhs.set("#member_init", 1);
-            // parsing non-static member initializer
-            if (get_decl_ref(*init->getMember(), lhs))
-              return true;
-
-            build_member_from_component(fd, lhs);
-            // set #member_init flag again, as it has been cleared between the first call...
-            lhs.set("#member_init", 1);
-
-            exprt rhs;
-            rhs.set("#member_init", 1);
-            if (get_expr(*init->getInit(), rhs))
-              return true;
-
-            initializer = side_effect_exprt("assign", lhs.type());
-            initializer.copy_to_operands(lhs, rhs);
-          }
-          else if (init->isDelegatingInitializer())
-          {
-            initializer.set(
-              "#delegating_ctor_this",
-              ftype.arguments().at(0).get("#identifier"));
-            initializer.set("#delegating_ctor", 1);
-            if (get_expr(*init->getInit(), initializer))
-              return true;
+            for (const struct_union_typet::componentt &c :
+                 this_type.components())
+              if (c.get_name() == member.component_name())
+                rhs_sym.move_to_operands(rhs);
+              else
+              {
+                member_exprt old(this_ptr, c.get_name(), c.type());
+                rhs_sym.move_to_operands(old);
+              }
           }
           else
           {
-            log_error("Unsupported initializer in {}", __func__);
-            abort();
+            /* single initializer for unions */
+            rhs_sym.component_name(member.component_name());
+            rhs_sym.move_to_operands(rhs);
           }
+
+          exprt this_sym = dereference_exprt(this_ptr, this_type);
+          initializer = side_effect_exprt("assign", this_sym.type());
+          initializer.move_to_operands(this_sym, rhs_sym);
         }
         else
         {
-          // Add additional annotation for `this` parameter
-          initializer.derived_this_arg(
-            ftype.arguments().at(0).get("#identifier"));
-          initializer.base_ctor_derived(true);
-          if (get_expr(*init->getInit(), initializer))
-            return true;
+          initializer = side_effect_exprt("assign", member.type());
+          initializer.move_to_operands(member, rhs);
         }
-
-        // Convert to code and insert side-effect in the operands list
-        // Essentially we convert an initializer to assignment, e.g:
-        // t1() : i(2){ }
-        // is converted to
-        // t1() { this->i = 2; }
-        convert_expression_to_code(initializer);
-        initializers.push_back(initializer);
+      }
+      else
+      {
+        log_error("Unsupported initializer in {}", __func__);
+        abort();
       }
 
-      // Insert at the beginning of the body
-      body.operands().insert(
-        body.operands().begin(), initializers.begin(), initializers.end());
+      // Convert to code and insert side-effect in the operands list
+      // Essentially we convert an initializer to assignment, e.g:
+      // t1() : i(2){ }
+      // is converted to
+      // t1() { this->i = 2; }
+      convert_expression_to_code(initializer);
+      initializers.push_back(initializer);
     }
+
+    // Insert initializers at the beginning of the body
+    body.operands().insert(
+      body.operands().begin(), initializers.begin(), initializers.end());
   }
 
   auto *type = fd.getType().getTypePtr();

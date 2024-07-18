@@ -1,0 +1,5 @@
+JSON AST (compact format):
+
+
+======= contract.sol =======
+{"absolutePath":"contract.sol","exportedSymbols":{"Base":[2]},"id":4,"license":"GPL-3.0","nodeType":"SourceUnit","nodes":[{"id":1,"literals":["solidity",">=","0.8",".0"],"nodeType":"PragmaDirective","src":"36:24:0"},{"abstract":false,"baseContracts":[],"canonicalName":"Base","contractDependencies":[],"contractKind":"contract","fullyImplemented":true,"id":2,"linearizedBaseContracts":[2],"name":"Base","nameLocation":"70:4:0","nodeType":"ContractDefinition","nodes":[],"scope":4,"src":"61:15:0","usedErrors":[],"usedEvents":[]},{"absolutePath":"contract.sol","file":"./contract.sol","id":3,"nameLocation":"-1:-1:-1","nodeType":"ImportDirective","scope":4,"sourceUnit":4,"src":"93:24:0","symbolAliases":[],"unitAlias":""}],"src":"36:82:0"}

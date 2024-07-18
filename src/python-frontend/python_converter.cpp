@@ -94,7 +94,7 @@ static struct_typet::componentt build_component(
   return comp;
 }
 
-// Convert Python/AST types to irep2 types
+// Convert Python/AST types to irep types
 typet python_converter::get_typet(const std::string &ast_type, size_t type_size)
 {
   if (ast_type == "float")
@@ -326,6 +326,44 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
 
   assert(!op.empty());
 
+  // Get LHS and RHS types from variable annotation
+  std::string lhs_type = get_var_type(lhs.name().as_string());
+  std::string rhs_type = get_var_type(rhs.name().as_string());
+
+  // If RHS is a string literal, like x = "foo", then we determine the type from the JSON value
+  if (
+    rhs_type.empty() && element.contains("comparators") &&
+    element["comparators"][0].contains("value") &&
+    element["comparators"][0]["value"].is_string())
+  {
+    rhs_type = "str";
+  }
+
+  if (op == "Eq" && lhs_type == "str" && rhs_type == "str")
+  {
+    if (rhs.type() != lhs.type())
+      return gen_boolean(false);
+
+    array_typet &arr_type = static_cast<array_typet &>(lhs.type());
+    BigInt str_size =
+      binary2integer(arr_type.size().value().as_string(), false);
+
+    // call strncmp to compare strings
+    symbolt *strncmp = context.find_symbol("c:@F@strncmp");
+    assert(strncmp);
+    side_effect_expr_function_callt sideeffect;
+    sideeffect.function() = symbol_expr(*strncmp);
+    sideeffect.arguments().push_back(lhs); // passing lhs to strncmp
+    sideeffect.arguments().push_back(rhs); // passing rhs to strncmp
+    sideeffect.arguments().push_back(
+      from_integer(str_size, long_uint_type())); // passing n to strncmp
+    sideeffect.location() = get_location_from_decl(element);
+    sideeffect.type() = int_type();
+
+    lhs = sideeffect;
+    rhs = gen_zero(int_type());
+  }
+
   adjust_statement_types(lhs, rhs);
 
   assert(lhs.type() == rhs.type());
@@ -404,7 +442,7 @@ exprt python_converter::get_unary_operator_expr(const nlohmann::json &element)
 
 const nlohmann::json python_converter::find_var_decl(
   const std::string &var_name,
-  const nlohmann::json &json)
+  const nlohmann::json &json) const
 {
   for (auto &element : json["body"])
   {
@@ -545,7 +583,11 @@ function_id python_converter::build_function_id(const nlohmann::json &element)
   {
     is_member_function_call = true;
     func_name = func_json["attr"];
-    obj_name = func_json["value"]["id"];
+    if (func_json["value"]["_type"] == "Attribute")
+      obj_name = func_json["value"]["attr"];
+    else
+      obj_name = func_json["value"]["id"];
+
     if (
       !is_class(obj_name, ast_json) &&
       json_utils::is_module(obj_name, ast_json))
@@ -609,19 +651,6 @@ exprt python_converter::get_function_call(const nlohmann::json &element)
   // TODO: Refactor into different classes/functions
   if (element.contains("func") && element["_type"] == "Call")
   {
-    bool is_instance_method_call = false;
-    bool is_class_method_call = false;
-
-    if (element["func"]["_type"] == "Attribute")
-    {
-      const std::string &func_value =
-        element["func"]["value"]["id"].get<std::string>();
-      if (is_class(func_value, ast_json) || is_builtin_type(func_value))
-        is_class_method_call = true;
-      else if (!json_utils::is_module(func_value, ast_json))
-        is_instance_method_call = true;
-    }
-
     function_id func_id = build_function_id(element);
     std::string func_name(func_id.function_name);
 
@@ -629,6 +658,7 @@ exprt python_converter::get_function_call(const nlohmann::json &element)
     std::regex pattern(
       R"(nondet_(int|char|bool|float)|__VERIFIER_nondet_(int|char|bool|float))");
 
+    // Handle non-det functions
     if (std::regex_match(func_name, pattern))
     {
       // Function name pattern: nondet_(type). e.g: nondet_bool(), nondet_int()
@@ -637,6 +667,23 @@ exprt python_converter::get_function_call(const nlohmann::json &element)
       exprt rhs = exprt("sideeffect", get_typet(type));
       rhs.statement("nondet");
       return rhs;
+    }
+
+    if (is_builtin_type(func_name) || is_consensus_type(func_name))
+    {
+      /* Calls to initialize variables using built-in type functions such as int(1), str("test"), bool(1)
+       * are converted to simple variable assignments, simplifying the handling of built-in type objects.
+       * For example, x = int(1) becomes x = 1. */
+      size_t arg_size = 1;
+      const auto &arg = element["args"][0];
+
+      if (func_name == "str")
+        arg_size = arg["value"].get<std::string>().size(); // get string length
+
+      typet t = get_typet(func_name, arg_size);
+      exprt expr = get_expr(arg);
+      expr.type() = t;
+      return expr;
     }
 
     locationt location = get_location_from_decl(element);
@@ -649,7 +696,7 @@ exprt python_converter::get_function_call(const nlohmann::json &element)
     {
       if (context.find_symbol(func_symbol_id.c_str()) == nullptr)
       {
-        // Create/init symbol
+        // Create/init __ESBMC_get_object_size symbol
         code_typet code_type;
         if (func_name == "__ESBMC_get_object_size")
         {
@@ -663,13 +710,38 @@ exprt python_converter::get_function_call(const nlohmann::json &element)
       }
     }
 
-    if (is_builtin_type(func_name) || is_consensus_type(func_name))
+    bool is_ctor_call = is_constructor_call(element);
+    bool is_instance_method_call = false;
+    bool is_class_method_call = false;
+    symbolt *obj_symbol = nullptr;
+    std::string obj_symbol_id("");
+
+    if (element["func"]["_type"] == "Attribute")
     {
-      // Replace the function call with a constant value. For example, x = int(1) becomes x = 1
-      typet t = get_typet(func_name);
-      exprt expr = get_expr(element["args"][0]);
-      expr.type() = t;
-      return expr;
+      const auto &subelement = element["func"]["value"];
+      const std::string &caller = subelement["_type"] == "Attribute"
+                                    ? subelement["attr"].get<std::string>()
+                                    : subelement["id"].get<std::string>();
+
+      obj_symbol_id = create_symbol_id() + "@" + caller;
+      obj_symbol = context.find_symbol(obj_symbol_id);
+
+      // Handling a function call as a class method call when:
+      // (1) The caller corresponds to a class name, for example: MyClass.foo().
+      // (2) Calling methods of built-in types, such as int.from_bytes()
+      //     All the calls to built-in methods are handled by class methods in operational models.
+      // (3) Calling a instance method from a built-in type object, for example: x.bit_length() when x is an int
+      // If the caller is a class or a built-in type, the following condition detects a class method call.
+      if (
+        is_class(caller, ast_json) || is_builtin_type(caller) ||
+        is_builtin_type(get_var_type(caller)))
+      {
+        is_class_method_call = true;
+      }
+      else if (!json_utils::is_module(caller, ast_json))
+      {
+        is_instance_method_call = true;
+      }
     }
 
     const symbolt *func_symbol = context.find_symbol(func_symbol_id.c_str());
@@ -677,8 +749,6 @@ exprt python_converter::get_function_call(const nlohmann::json &element)
     // Find function in imported modules
     if (!func_symbol)
       func_symbol = find_function_in_imported_modules(func_symbol_id);
-
-    bool is_ctor_call = is_constructor_call(element);
 
     if (func_symbol == nullptr)
     {
@@ -702,11 +772,9 @@ exprt python_converter::get_function_call(const nlohmann::json &element)
         }
         else if (is_instance_method_call)
         {
-          // Update obj attributes from self
-          const std::string &obj_name = element["func"]["value"]["id"];
-          const std::string obj_symbol_id = create_symbol_id() + "@" + obj_name;
-          assert(context.find_symbol(obj_symbol_id));
+          assert(obj_symbol);
 
+          // Update obj attributes from self
           update_instance_from_self(
             get_classname_from_symbol_id(func_symbol->id.as_string()),
             func_name,
@@ -735,17 +803,25 @@ exprt python_converter::get_function_call(const nlohmann::json &element)
     }
     else if (is_instance_method_call)
     {
-      // Self is the obj instance from obj.method() call
-      std::string symbol_id = create_symbol_id() + "@" +
-                              element["func"]["value"]["id"].get<std::string>();
-      symbolt *obj_symbol = context.find_symbol(symbol_id);
       assert(obj_symbol);
+      // Passing object as "self" (first) parameter on instance method calls
       call.arguments().push_back(gen_address_of(symbol_expr(*obj_symbol)));
     }
     else if (is_class_method_call)
     {
+      // Passing a void pointer to the "cls" argument
       typet t = pointer_typet(empty_typet());
       call.arguments().push_back(gen_zero(t));
+
+      // All methods for the int class without parameters acts solely on the encapsulated integer value.
+      // Therefore, we always pass the caller (obj) as a parameter in these functions.
+      // For example, if x is an int instance, x.bit_length() call becomes bit_length(x)
+      if (
+        obj_symbol && get_var_type(obj_symbol->name.as_string()) == "int" &&
+        element["args"].empty())
+      {
+        call.arguments().push_back(symbol_expr(*obj_symbol));
+      }
     }
 
     for (const auto &arg_node : element["args"])
@@ -810,10 +886,14 @@ exprt python_converter::get_literal(const nlohmann::json &element)
     return from_integer(str[0], t);
   }
 
+  // Docstrings are ignored
+  if (value.get<std::string>()[0] == '\n')
+    return exprt();
+
   // bytes/string literals
-  if (value.is_string() && current_element_type.is_array())
+  if (value.is_string())
   {
-    exprt expr = gen_zero(current_element_type);
+    typet t = current_element_type;
     std::vector<uint8_t> string_literal;
 
     // "bytes" literals
@@ -824,13 +904,15 @@ exprt python_converter::get_literal(const nlohmann::json &element)
     }
     else // string literals
     {
+      t = get_typet("str", value.get<std::string>().size());
       const std::string &value = element["value"].get<std::string>();
       string_literal = std::vector<uint8_t>(std::begin(value), std::end(value));
     }
 
-    typet &char_type = current_element_type.subtype();
+    typet &char_type = t.subtype();
+    exprt expr = gen_zero(t);
 
-    // initialize array
+    // Initialise array
     unsigned int i = 0;
     for (uint8_t &ch : string_literal)
     {
@@ -842,10 +924,6 @@ exprt python_converter::get_literal(const nlohmann::json &element)
     }
     return expr;
   }
-
-  // Docstrings are ignored
-  if (value.get<std::string>()[0] == '\n')
-    return exprt();
 
   log_error("Unsupported literal: {}\n", value.get<std::string>());
   abort();
@@ -1083,49 +1161,74 @@ void python_converter::update_instance_from_self(
   }
 }
 
+size_t get_type_size(const nlohmann::json &ast_node)
+{
+  size_t type_size = 0;
+  if (ast_node["value"].contains("value"))
+  {
+    if (ast_node["annotation"]["id"] == "bytes")
+    {
+      const std::string &str =
+        ast_node["value"]["encoded_bytes"].get<std::string>();
+      std::vector<uint8_t> decoded = base64_decode(str);
+      type_size = decoded.size();
+    }
+    else if (ast_node["value"]["value"].is_string())
+      type_size = ast_node["value"]["value"].get<std::string>().size();
+  }
+  else if (
+    ast_node["value"].contains("args") &&
+    ast_node["value"]["args"].size() > 0 &&
+    ast_node["value"]["args"][0].contains("value") &&
+    ast_node["value"]["args"][0]["value"].is_string())
+    type_size = ast_node["value"]["args"][0]["value"].get<std::string>().size();
+
+  return type_size;
+}
+
+std::string python_converter::get_var_type(const std::string &var_name) const
+{
+  nlohmann::json ref;
+  // Get variable from current function
+  for (const auto &elem : ast_json["body"])
+  {
+    if (elem["_type"] == "FunctionDef" && elem["name"] == current_func_name)
+      ref = find_var_decl(var_name, elem);
+  }
+
+  // Get variable from global scope
+  if (ref.empty())
+    ref = find_var_decl(var_name, ast_json);
+
+  if (ref.empty())
+    return std::string();
+
+  return ref["annotation"]["id"].get<std::string>();
+}
+
 void python_converter::get_var_assign(
   const nlohmann::json &ast_node,
   codet &target_block)
 {
   if (ast_node.contains("annotation"))
   {
-    // Get type from current annotation node
-    size_t type_size = 0;
-    if (ast_node["value"].contains("value"))
-    {
-      if (ast_node["annotation"]["id"] == "bytes")
-      {
-        const std::string &str =
-          ast_node["value"]["encoded_bytes"].get<std::string>();
-        std::vector<uint8_t> decoded = base64_decode(str);
-        type_size = decoded.size();
-      }
-      else if (ast_node["value"]["value"].is_string())
-        type_size = ast_node["value"]["value"].get<std::string>().size();
-    }
-
-    current_element_type =
-      get_typet(ast_node["annotation"]["id"].get<std::string>(), type_size);
+    // Get type from annotation node
+    size_t type_size = get_type_size(ast_node);
+    const auto &annotated_type = ast_node["annotation"]["id"];
+    current_element_type = get_typet(annotated_type, type_size);
   }
   else
   {
     // Get type from declaration node
-    std::string var_name = ast_node["targets"][0]["id"].get<std::string>();
-    // Get variable from current function
-    nlohmann::json ref;
-    for (const auto &elem : ast_json["body"])
+    const std::string &var_name =
+      ast_node["targets"][0]["id"].get<std::string>();
+    const std::string &var_type = get_var_type(var_name);
+    if (var_type.empty())
     {
-      if (elem["_type"] == "FunctionDef" && elem["name"] == current_func_name)
-        ref = find_var_decl(var_name, elem);
+      log_error("Type undefined for {}", var_name);
+      abort();
     }
-
-    // Get variable from global scope
-    if (ref.empty())
-      ref = find_var_decl(var_name, ast_json);
-
-    assert(!ref.empty());
-    current_element_type =
-      get_typet(ref["annotation"]["id"].get<std::string>());
+    current_element_type = get_typet(var_type);
   }
 
   exprt lhs;
@@ -1176,7 +1279,7 @@ void python_converter::get_var_assign(
   }
   else if (ast_node["_type"] == "Assign")
   {
-    std::string name = ast_node["targets"][0]["id"].get<std::string>();
+    const std::string &name = ast_node["targets"][0]["id"].get<std::string>();
     std::string symbol_id = create_symbol_id() + "@" + name;
     lhs_symbol = context.find_symbol(symbol_id);
     assert(lhs_symbol);

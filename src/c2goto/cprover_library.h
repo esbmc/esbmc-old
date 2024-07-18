@@ -21,6 +21,6 @@ void add_bundled_library_sources(
 
 void add_cprover_library(
   contextt &context,
-  const languaget *c_language = nullptr);
+  const languaget *language = nullptr);
 
 #endif

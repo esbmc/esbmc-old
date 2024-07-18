@@ -3,7 +3,8 @@
 #include <c2goto/cprover_library.h>
 #include <cstdlib>
 #include <fstream>
-#include <goto-programs/read_goto_binary.h>
+#include <goto-programs/goto_binary_reader.h>
+#include <goto-programs/goto_functions.h>
 #include <util/c_link.h>
 #include <util/config.h>
 #include <util/language.h>
@@ -86,6 +87,9 @@ static const struct buffer
   },
 #endif
 };
+
+const static std::vector<std::string> python_c_models = {"strncmp"};
+
 } // namespace
 
 static void generate_symbol_deps(
@@ -162,7 +166,7 @@ static void ingest_symbol(
   deps.erase(name);
 }
 
-void add_cprover_library(contextt &context, const languaget *c_language)
+void add_cprover_library(contextt &context, const languaget *language)
 {
   if (config.ansi_c.lib == configt::ansi_ct::libt::LIB_NONE)
     return;
@@ -192,13 +196,19 @@ void add_cprover_library(contextt &context, const languaget *c_language)
 
   if (clib->size == 0)
   {
-    if (c_language)
-      return add_bundled_library_sources(context, *c_language);
+    if (language)
+      return add_bundled_library_sources(context, *language);
     log_error("Zero-lengthed internal C library");
     abort();
   }
 
-  if (read_goto_binary_array(clib->start, clib->size, new_ctx, goto_functions))
+  goto_binary_reader goto_reader;
+
+  if (language && language->id() == "python")
+    goto_reader.set_functions_to_read(python_c_models);
+
+  if (goto_reader.read_goto_binary_array(
+        clib->start, clib->size, new_ctx, goto_functions))
     abort();
 
   new_ctx.foreach_operand([&symbol_deps](const symbolt &s) {
@@ -226,9 +236,12 @@ void add_cprover_library(contextt &context, const languaget *c_language)
    * that adds no new symbols. */
 
   new_ctx.foreach_operand(
-    [&context, &store_ctx, &symbol_deps, &to_include](const symbolt &s) {
+    [&context, &store_ctx, &symbol_deps, &to_include, &language](
+      const symbolt &s) {
       const symbolt *symbol = context.find_symbol(s.id);
-      if (symbol != nullptr && symbol->value.is_nil())
+      if (
+        (language && language->id() == "python") ||
+        (symbol != nullptr && symbol->value.is_nil()))
       {
         store_ctx.add(s);
         ingest_symbol(s.id, symbol_deps, to_include);

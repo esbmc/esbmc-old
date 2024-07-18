@@ -2,13 +2,14 @@
 #define CPROVER_LANGUAGE_UI_H
 
 #include <util/language.h>
-#include <util/language_file.h>
 #include <util/parseoptions.h>
 
 class language_uit
 {
 public:
-  language_filest language_files;
+  typedef std::map<language_idt, std::unique_ptr<languaget>> langmapt;
+  langmapt langmap;
+
   contextt context;
   namespacet ns;
 
@@ -22,7 +23,7 @@ public:
 
   virtual void clear_parse()
   {
-    language_files.clear();
+    langmap.clear();
   }
 
   virtual void show_symbol_table();

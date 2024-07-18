@@ -1,4 +1,4 @@
 KNOWNBUG
 main.c
---k-induction-parallel
+--k-induction-parallel --std=gnu89
 ^VERIFICATION SUCCESSFUL$

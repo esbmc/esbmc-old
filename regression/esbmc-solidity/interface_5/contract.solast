@@ -1,0 +1,461 @@
+JSON AST (compact format):
+
+
+======= contract.sol =======
+{
+    "absolutePath": "contract.sol",
+    "exportedSymbols": {
+        "Test": [
+            34
+        ],
+        "caculator": [
+            5
+        ]
+    },
+    "id": 35,
+    "nodeType": "SourceUnit",
+    "nodes": [
+        {
+            "id": 1,
+            "literals": [
+                "solidity",
+                ">=",
+                "0.5",
+                ".0"
+            ],
+            "nodeType": "PragmaDirective",
+            "src": "0:24:0"
+        },
+        {
+            "abstract": true,
+            "baseContracts": [],
+            "canonicalName": "caculator",
+            "contractDependencies": [],
+            "contractKind": "contract",
+            "fullyImplemented": true,
+            "id": 5,
+            "linearizedBaseContracts": [
+                5
+            ],
+            "name": "caculator",
+            "nameLocation": "44:9:0",
+            "nodeType": "ContractDefinition",
+            "nodes": [
+                {
+                    "canonicalName": "caculator.E",
+                    "id": 4,
+                    "members": [
+                        {
+                            "id": 2,
+                            "name": "x",
+                            "nameLocation": "77:1:0",
+                            "nodeType": "EnumValue",
+                            "src": "77:1:0"
+                        },
+                        {
+                            "id": 3,
+                            "name": "y",
+                            "nameLocation": "88:1:0",
+                            "nodeType": "EnumValue",
+                            "src": "88:1:0"
+                        }
+                    ],
+                    "name": "E",
+                    "nameLocation": "65:1:0",
+                    "nodeType": "EnumDefinition",
+                    "src": "60:35:0"
+                }
+            ],
+            "scope": 35,
+            "src": "26:71:0",
+            "usedErrors": [],
+            "usedEvents": []
+        },
+        {
+            "abstract": false,
+            "baseContracts": [],
+            "canonicalName": "Test",
+            "contractDependencies": [],
+            "contractKind": "contract",
+            "fullyImplemented": true,
+            "id": 34,
+            "linearizedBaseContracts": [
+                34
+            ],
+            "name": "Test",
+            "nameLocation": "108:4:0",
+            "nodeType": "ContractDefinition",
+            "nodes": [
+                {
+                    "body": {
+                        "id": 18,
+                        "nodeType": "Block",
+                        "src": "153:55:0",
+                        "statements": [
+                            {
+                                "expression": {
+                                    "arguments": [
+                                        {
+                                            "commonType": {
+                                                "typeIdentifier": "t_enum$_E_$4",
+                                                "typeString": "enum caculator.E"
+                                            },
+                                            "id": 15,
+                                            "isConstant": false,
+                                            "isLValue": false,
+                                            "isPure": true,
+                                            "lValueRequested": false,
+                                            "leftExpression": {
+                                                "expression": {
+                                                    "expression": {
+                                                        "id": 9,
+                                                        "name": "caculator",
+                                                        "nodeType": "Identifier",
+                                                        "overloadedDeclarations": [],
+                                                        "referencedDeclaration": 5,
+                                                        "src": "170:9:0",
+                                                        "typeDescriptions": {
+                                                            "typeIdentifier": "t_type$_t_contract$_caculator_$5_$",
+                                                            "typeString": "type(contract caculator)"
+                                                        }
+                                                    },
+                                                    "id": 10,
+                                                    "isConstant": false,
+                                                    "isLValue": false,
+                                                    "isPure": false,
+                                                    "lValueRequested": false,
+                                                    "memberLocation": "180:1:0",
+                                                    "memberName": "E",
+                                                    "nodeType": "MemberAccess",
+                                                    "referencedDeclaration": 4,
+                                                    "src": "170:11:0",
+                                                    "typeDescriptions": {
+                                                        "typeIdentifier": "t_type$_t_enum$_E_$4_$",
+                                                        "typeString": "type(enum caculator.E)"
+                                                    }
+                                                },
+                                                "id": 11,
+                                                "isConstant": false,
+                                                "isLValue": false,
+                                                "isPure": true,
+                                                "lValueRequested": false,
+                                                "memberLocation": "182:1:0",
+                                                "memberName": "x",
+                                                "nodeType": "MemberAccess",
+                                                "referencedDeclaration": 2,
+                                                "src": "170:13:0",
+                                                "typeDescriptions": {
+                                                    "typeIdentifier": "t_enum$_E_$4",
+                                                    "typeString": "enum caculator.E"
+                                                }
+                                            },
+                                            "nodeType": "BinaryOperation",
+                                            "operator": "<=",
+                                            "rightExpression": {
+                                                "expression": {
+                                                    "expression": {
+                                                        "id": 12,
+                                                        "name": "caculator",
+                                                        "nodeType": "Identifier",
+                                                        "overloadedDeclarations": [],
+                                                        "referencedDeclaration": 5,
+                                                        "src": "187:9:0",
+                                                        "typeDescriptions": {
+                                                            "typeIdentifier": "t_type$_t_contract$_caculator_$5_$",
+                                                            "typeString": "type(contract caculator)"
+                                                        }
+                                                    },
+                                                    "id": 13,
+                                                    "isConstant": false,
+                                                    "isLValue": false,
+                                                    "isPure": false,
+                                                    "lValueRequested": false,
+                                                    "memberLocation": "197:1:0",
+                                                    "memberName": "E",
+                                                    "nodeType": "MemberAccess",
+                                                    "referencedDeclaration": 4,
+                                                    "src": "187:11:0",
+                                                    "typeDescriptions": {
+                                                        "typeIdentifier": "t_type$_t_enum$_E_$4_$",
+                                                        "typeString": "type(enum caculator.E)"
+                                                    }
+                                                },
+                                                "id": 14,
+                                                "isConstant": false,
+                                                "isLValue": false,
+                                                "isPure": true,
+                                                "lValueRequested": false,
+                                                "memberLocation": "199:1:0",
+                                                "memberName": "y",
+                                                "nodeType": "MemberAccess",
+                                                "referencedDeclaration": 3,
+                                                "src": "187:13:0",
+                                                "typeDescriptions": {
+                                                    "typeIdentifier": "t_enum$_E_$4",
+                                                    "typeString": "enum caculator.E"
+                                                }
+                                            },
+                                            "src": "170:30:0",
+                                            "typeDescriptions": {
+                                                "typeIdentifier": "t_bool",
+                                                "typeString": "bool"
+                                            }
+                                        }
+                                    ],
+                                    "expression": {
+                                        "argumentTypes": [
+                                            {
+                                                "typeIdentifier": "t_bool",
+                                                "typeString": "bool"
+                                            }
+                                        ],
+                                        "id": 8,
+                                        "name": "assert",
+                                        "nodeType": "Identifier",
+                                        "overloadedDeclarations": [],
+                                        "referencedDeclaration": -3,
+                                        "src": "163:6:0",
+                                        "typeDescriptions": {
+                                            "typeIdentifier": "t_function_assert_pure$_t_bool_$returns$__$",
+                                            "typeString": "function (bool) pure"
+                                        }
+                                    },
+                                    "id": 16,
+                                    "isConstant": false,
+                                    "isLValue": false,
+                                    "isPure": false,
+                                    "kind": "functionCall",
+                                    "lValueRequested": false,
+                                    "nameLocations": [],
+                                    "names": [],
+                                    "nodeType": "FunctionCall",
+                                    "src": "163:38:0",
+                                    "tryCall": false,
+                                    "typeDescriptions": {
+                                        "typeIdentifier": "t_tuple$__$",
+                                        "typeString": "tuple()"
+                                    }
+                                },
+                                "id": 17,
+                                "nodeType": "ExpressionStatement",
+                                "src": "163:38:0"
+                            }
+                        ]
+                    },
+                    "functionSelector": "8020bce8",
+                    "id": 19,
+                    "implemented": true,
+                    "kind": "function",
+                    "modifiers": [],
+                    "name": "caculator",
+                    "nameLocation": "128:9:0",
+                    "nodeType": "FunctionDefinition",
+                    "parameters": {
+                        "id": 6,
+                        "nodeType": "ParameterList",
+                        "parameters": [],
+                        "src": "137:2:0"
+                    },
+                    "returnParameters": {
+                        "id": 7,
+                        "nodeType": "ParameterList",
+                        "parameters": [],
+                        "src": "153:0:0"
+                    },
+                    "scope": 34,
+                    "src": "119:89:0",
+                    "stateMutability": "pure",
+                    "virtual": false,
+                    "visibility": "external"
+                },
+                {
+                    "body": {
+                        "id": 32,
+                        "nodeType": "Block",
+                        "src": "242:54:0",
+                        "statements": [
+                            {
+                                "expression": {
+                                    "arguments": [
+                                        {
+                                            "commonType": {
+                                                "typeIdentifier": "t_enum$_E_$4",
+                                                "typeString": "enum caculator.E"
+                                            },
+                                            "id": 29,
+                                            "isConstant": false,
+                                            "isLValue": false,
+                                            "isPure": true,
+                                            "lValueRequested": false,
+                                            "leftExpression": {
+                                                "expression": {
+                                                    "expression": {
+                                                        "id": 23,
+                                                        "name": "caculator",
+                                                        "nodeType": "Identifier",
+                                                        "overloadedDeclarations": [],
+                                                        "referencedDeclaration": 5,
+                                                        "src": "259:9:0",
+                                                        "typeDescriptions": {
+                                                            "typeIdentifier": "t_type$_t_contract$_caculator_$5_$",
+                                                            "typeString": "type(contract caculator)"
+                                                        }
+                                                    },
+                                                    "id": 24,
+                                                    "isConstant": false,
+                                                    "isLValue": false,
+                                                    "isPure": false,
+                                                    "lValueRequested": false,
+                                                    "memberLocation": "269:1:0",
+                                                    "memberName": "E",
+                                                    "nodeType": "MemberAccess",
+                                                    "referencedDeclaration": 4,
+                                                    "src": "259:11:0",
+                                                    "typeDescriptions": {
+                                                        "typeIdentifier": "t_type$_t_enum$_E_$4_$",
+                                                        "typeString": "type(enum caculator.E)"
+                                                    }
+                                                },
+                                                "id": 25,
+                                                "isConstant": false,
+                                                "isLValue": false,
+                                                "isPure": true,
+                                                "lValueRequested": false,
+                                                "memberLocation": "271:1:0",
+                                                "memberName": "x",
+                                                "nodeType": "MemberAccess",
+                                                "referencedDeclaration": 2,
+                                                "src": "259:13:0",
+                                                "typeDescriptions": {
+                                                    "typeIdentifier": "t_enum$_E_$4",
+                                                    "typeString": "enum caculator.E"
+                                                }
+                                            },
+                                            "nodeType": "BinaryOperation",
+                                            "operator": ">",
+                                            "rightExpression": {
+                                                "expression": {
+                                                    "expression": {
+                                                        "id": 26,
+                                                        "name": "caculator",
+                                                        "nodeType": "Identifier",
+                                                        "overloadedDeclarations": [],
+                                                        "referencedDeclaration": 5,
+                                                        "src": "275:9:0",
+                                                        "typeDescriptions": {
+                                                            "typeIdentifier": "t_type$_t_contract$_caculator_$5_$",
+                                                            "typeString": "type(contract caculator)"
+                                                        }
+                                                    },
+                                                    "id": 27,
+                                                    "isConstant": false,
+                                                    "isLValue": false,
+                                                    "isPure": false,
+                                                    "lValueRequested": false,
+                                                    "memberLocation": "285:1:0",
+                                                    "memberName": "E",
+                                                    "nodeType": "MemberAccess",
+                                                    "referencedDeclaration": 4,
+                                                    "src": "275:11:0",
+                                                    "typeDescriptions": {
+                                                        "typeIdentifier": "t_type$_t_enum$_E_$4_$",
+                                                        "typeString": "type(enum caculator.E)"
+                                                    }
+                                                },
+                                                "id": 28,
+                                                "isConstant": false,
+                                                "isLValue": false,
+                                                "isPure": true,
+                                                "lValueRequested": false,
+                                                "memberLocation": "287:1:0",
+                                                "memberName": "y",
+                                                "nodeType": "MemberAccess",
+                                                "referencedDeclaration": 3,
+                                                "src": "275:13:0",
+                                                "typeDescriptions": {
+                                                    "typeIdentifier": "t_enum$_E_$4",
+                                                    "typeString": "enum caculator.E"
+                                                }
+                                            },
+                                            "src": "259:29:0",
+                                            "typeDescriptions": {
+                                                "typeIdentifier": "t_bool",
+                                                "typeString": "bool"
+                                            }
+                                        }
+                                    ],
+                                    "expression": {
+                                        "argumentTypes": [
+                                            {
+                                                "typeIdentifier": "t_bool",
+                                                "typeString": "bool"
+                                            }
+                                        ],
+                                        "id": 22,
+                                        "name": "assert",
+                                        "nodeType": "Identifier",
+                                        "overloadedDeclarations": [],
+                                        "referencedDeclaration": -3,
+                                        "src": "252:6:0",
+                                        "typeDescriptions": {
+                                            "typeIdentifier": "t_function_assert_pure$_t_bool_$returns$__$",
+                                            "typeString": "function (bool) pure"
+                                        }
+                                    },
+                                    "id": 30,
+                                    "isConstant": false,
+                                    "isLValue": false,
+                                    "isPure": false,
+                                    "kind": "functionCall",
+                                    "lValueRequested": false,
+                                    "nameLocations": [],
+                                    "names": [],
+                                    "nodeType": "FunctionCall",
+                                    "src": "252:37:0",
+                                    "tryCall": false,
+                                    "typeDescriptions": {
+                                        "typeIdentifier": "t_tuple$__$",
+                                        "typeString": "tuple()"
+                                    }
+                                },
+                                "id": 31,
+                                "nodeType": "ExpressionStatement",
+                                "src": "252:37:0"
+                            }
+                        ]
+                    },
+                    "functionSelector": "f8a8fd6d",
+                    "id": 33,
+                    "implemented": true,
+                    "kind": "function",
+                    "modifiers": [],
+                    "name": "test",
+                    "nameLocation": "222:4:0",
+                    "nodeType": "FunctionDefinition",
+                    "parameters": {
+                        "id": 20,
+                        "nodeType": "ParameterList",
+                        "parameters": [],
+                        "src": "226:2:0"
+                    },
+                    "returnParameters": {
+                        "id": 21,
+                        "nodeType": "ParameterList",
+                        "parameters": [],
+                        "src": "242:0:0"
+                    },
+                    "scope": 34,
+                    "src": "213:83:0",
+                    "stateMutability": "pure",
+                    "virtual": false,
+                    "visibility": "external"
+                }
+            ],
+            "scope": 35,
+            "src": "99:199:0",
+            "usedErrors": [],
+            "usedEvents": []
+        }
+    ],
+    "src": "0:298:0"
+}

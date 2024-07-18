@@ -1,0 +1,8 @@
+CORE
+main.c 
+--multi-property --overflow-check --k-induction
+^VERIFICATION FAILED$
+\bdivision by zero\b
+\bnum != 0\b
+\bdivision by zero\b
+\bnum1 != 0\b

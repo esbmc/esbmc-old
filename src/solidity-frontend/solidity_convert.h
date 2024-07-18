@@ -27,6 +27,10 @@ public:
   bool convert();
 
 protected:
+  void multi_json_file();
+  std::vector<nlohmann::json> topological_sort(
+    std::unordered_map<std::string, std::unordered_set<std::string>> &graph,
+    std::unordered_map<std::string, nlohmann::json> &path_to_json);
   bool convert_ast_nodes(const nlohmann::json &contract_def);
 
   // conversion functions
@@ -45,6 +49,7 @@ protected:
   bool get_struct_class(const nlohmann::json &ast_node);
   void add_enum_member_val(nlohmann::json &ast_node);
   bool get_error_definition(const nlohmann::json &ast_node);
+  void add_empty_function_body(nlohmann::json &ast_node);
 
   // handle the implicit constructor
   bool add_implicit_constructor();
@@ -208,7 +213,9 @@ protected:
   contextt &context;
   namespacet ns;
   // json for Solidity AST. Use vector for multiple contracts
-  nlohmann::json &src_ast_json;
+  nlohmann::json src_ast_json_array = nlohmann::json::array();
+  // json for Solidity AST. Use object for single contract
+  nlohmann::json src_ast_json;
   // Solidity function to be verified
   const std::string &sol_func;
   //smart contract source file

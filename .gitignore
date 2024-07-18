@@ -9,6 +9,11 @@ out
 CMakeSettings.json
 build
 
+# eclipse
+.cproject
+.project
+.settings/
+
 # others
 __pycache__
 .DS_Store

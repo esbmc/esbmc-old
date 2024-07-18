@@ -33,7 +33,7 @@ extern "C"
 #include <goto-programs/abstract-interpretation/interval_analysis.h>
 #include <goto-programs/abstract-interpretation/gcse.h>
 #include <goto-programs/loop_numbers.h>
-#include <goto-programs/read_goto_binary.h>
+#include <goto-programs/goto_binary_reader.h>
 #include <goto-programs/write_goto_binary.h>
 #include <goto-programs/remove_no_op.h>
 #include <goto-programs/remove_unreachable.h>
@@ -51,6 +51,7 @@ extern "C"
 #include <pointer-analysis/value_set_analysis.h>
 #include <util/symbol.h>
 #include <util/time_stopping.h>
+#include <goto-programs/goto_cfg.h>
 
 #ifndef _WIN32
 #  include <sys/wait.h>
@@ -1191,7 +1192,9 @@ int esbmc_parseoptionst::do_bmc_strategy(
     // k-induction
     if (options.get_bool_option("k-induction"))
     {
-      if (is_base_case_violated(options, goto_functions, k_step).is_true())
+      if (
+        is_base_case_violated(options, goto_functions, k_step).is_true() &&
+        !cmdline.isset("multi-property"))
         return 1;
 
       if (does_forward_condition_hold(options, goto_functions, k_step)
@@ -1221,7 +1224,9 @@ int esbmc_parseoptionst::do_bmc_strategy(
     // incremental-bmc
     if (options.get_bool_option("incremental-bmc"))
     {
-      if (is_base_case_violated(options, goto_functions, k_step).is_true())
+      if (
+        is_base_case_violated(options, goto_functions, k_step).is_true() &&
+        !cmdline.isset("multi-property"))
         return 1;
 
       if (does_forward_condition_hold(options, goto_functions, k_step)
@@ -1598,9 +1603,10 @@ bool esbmc_parseoptionst::create_goto_program(
 bool esbmc_parseoptionst::read_goto_binary(goto_functionst &goto_functions)
 {
   log_progress("Reading GOTO program from file");
+  goto_binary_reader goto_reader;
   for (const auto &arg : cmdline.args)
   {
-    if (::read_goto_binary(arg, context, goto_functions))
+    if (goto_reader.read_goto_binary(arg, context, goto_functions))
     {
       log_error("Failed to open `{}'", arg);
       return true;
@@ -1625,10 +1631,9 @@ bool esbmc_parseoptionst::parse_goto_program(
 
     if (cmdline.isset("parse-tree-too") || cmdline.isset("parse-tree-only"))
     {
-      assert(language_files.filemap.size());
-      languaget &language = *language_files.filemap.begin()->second.language;
       std::ostringstream oss;
-      language.show_parse(oss);
+      for (auto &it : langmap)
+        it.second->show_parse(oss);
       log_status("{}", oss.str());
       if (cmdline.isset("parse-tree-only"))
         return true;
@@ -1966,6 +1971,13 @@ bool esbmc_parseoptionst::output_goto_program(
       log_status("{}", oss.str());
       if (cmdline.isset("goto-functions-only"))
         return true;
+    }
+
+    if (cmdline.isset("dump-goto-cfg"))
+    {
+      goto_cfg cfg(goto_functions);
+      cfg.dump_graph();
+      return true;
     }
 
     // Translate the GOTO program to C and output it into the log or

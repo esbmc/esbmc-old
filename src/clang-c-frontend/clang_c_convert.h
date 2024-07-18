@@ -51,7 +51,7 @@ class clang_c_convertert
 public:
   clang_c_convertert(
     contextt &_context,
-    std::vector<std::unique_ptr<clang::ASTUnit>> &_ASTs,
+    std::unique_ptr<clang::ASTUnit> &_AST,
     irep_idt _mode);
   virtual ~clang_c_convertert() = default;
 
@@ -76,7 +76,7 @@ protected:
   clang::ASTContext *ASTContext;
   contextt &context;
   namespacet ns;
-  std::vector<std::unique_ptr<clang::ASTUnit>> &ASTs;
+  std::unique_ptr<clang::ASTUnit> &AST;
   irep_idt mode;
   symbol_generator anon_symbol;
 

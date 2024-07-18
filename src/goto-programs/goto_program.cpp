@@ -86,10 +86,16 @@ void goto_programt::instructiont::output_instruction(
   break;
 
   case DECL:
+    out << "DECL " << from_expr(ns, identifier, code) << "\n";
+    break;
   case DEAD:
+    out << "DEAD " << to_code_dead2t(code).value << "\n";
+    break;
   case OTHER:
+    out << "OTHER " << from_expr(ns, identifier, code) << "\n";
+    break;
   case ASSIGN:
-    out << from_expr(ns, identifier, code) << "\n";
+    out << "ASSIGN " << from_expr(ns, identifier, code) << "\n";
     break;
 
   case ASSUME:

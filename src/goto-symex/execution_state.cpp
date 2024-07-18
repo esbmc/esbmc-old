@@ -813,8 +813,7 @@ void execution_statet::get_expr_globals(
     return;
 
   if (
-    is_address_of2t(expr) || is_pointer_type(expr) || is_valid_object2t(expr) ||
-    is_dynamic_size2t(expr))
+    is_address_of2t(expr) || is_valid_object2t(expr) || is_dynamic_size2t(expr))
   {
     return;
   }
@@ -843,7 +842,9 @@ void execution_statet::get_expr_globals(
     {
       return;
     }
-    if ((symbol->static_lifetime || symbol->type.is_dynamic_set()))
+    if (
+      (symbol->static_lifetime || symbol->type.is_dynamic_set()) ||
+      symbol->type.is_pointer())
     {
       std::list<unsigned int> threadId_list;
       auto it_find = art1->vars_map.find(expr);

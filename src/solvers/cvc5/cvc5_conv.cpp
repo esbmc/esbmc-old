@@ -107,7 +107,7 @@ expr2tc cvc5_convt::get_array_elem(
 const std::string cvc5_convt::solver_text()
 {
   std::stringstream ss;
-  ss << "CVC " << slv.getVersion();
+  ss << "CVC5 " << slv.getVersion();
   return ss.str();
 }
 
@@ -599,6 +599,7 @@ smt_astt cvc5_convt::mk_bvadd(smt_astt a, smt_astt b)
 {
   assert(a->sort->id != SMT_SORT_INT && a->sort->id != SMT_SORT_REAL);
   assert(b->sort->id != SMT_SORT_INT && b->sort->id != SMT_SORT_REAL);
+  assert(a->sort->get_data_width() == b->sort->get_data_width());
   return new_ast(
     slv.mkTerm(
       cvc5::Kind::BITVECTOR_ADD,
@@ -1136,16 +1137,18 @@ smt_astt cvc5_convt::mk_smt_symbol(const std::string &name, const smt_sort *s)
   // Standard arrangement: if we already have the name, return the expression
   // from the symbol table. If not, time for a new name.
 
-  auto [it, ins] = symtable.try_emplace(name, nullptr);
-  if (ins)
-  {
-    // Time for a new one.
-    const cvc5::Sort &srt = to_solver_smt_sort<cvc5::Sort>(s)->s;
-    cvc5::Term e = slv.mkConst(srt, name); // "global", eh?
-    it->second = new_ast(e, s);
-  }
+  symtabt::iterator it = symtable.find(name);
+  if (it != symtable.end())
+    return it->ast;
 
-  return it->second;
+  // Time for a new one.
+  const cvc5::Sort &srt = to_solver_smt_sort<cvc5::Sort>(s)->s;
+  cvc5::Term e = slv.mkConst(srt, name); // "global", eh?
+  smt_astt ast = new_ast(e, s);
+
+  symtable.emplace(name, ast, ctx_level);
+
+  return ast;
 }
 
 smt_astt cvc5_convt::mk_extract(smt_astt a, unsigned int high, unsigned int low)
@@ -1296,6 +1299,9 @@ void cvc5_convt::push_ctx()
 
 void cvc5_convt::pop_ctx()
 {
+  symtabt::nth_index<1>::type &symtab_levels = symtable.get<1>();
+  symtab_levels.erase(ctx_level);
+
   slv.pop();
   smt_convt::pop_ctx();
 }

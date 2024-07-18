@@ -121,6 +121,10 @@ typedef union
 } pthread_barrierattr_t;
 #endif
 
+struct sched_param
+{
+   int __sched_priority;
+};
 
 #if __WORDSIZE == 32
 /* Extra attributes for the cleanup functions.  */

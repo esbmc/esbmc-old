@@ -125,6 +125,21 @@ private:
     return type;
   }
 
+  std::string
+  get_function_return_type(const std::string &func_name, const Json &ast)
+  {
+    for (const Json &elem : ast["body"])
+    {
+      if (
+        elem["_type"] == "FunctionDef" && elem["name"] == func_name &&
+        elem.contains("returns") && !elem["returns"].is_null())
+      {
+        return elem["returns"]["id"];
+      }
+    }
+    return std::string();
+  }
+
   void add_annotation(Json &body)
   {
     for (auto &element : body["body"])
@@ -135,7 +150,7 @@ private:
 
       if (stmt_type == "Assign" && element["type_comment"].is_null())
       {
-        std::string type("");
+        std::string inferred_type("");
 
         // Check if LHS was previously annotated
         if (
@@ -155,31 +170,30 @@ private:
               find_annotated_assign(element["targets"][0]["id"], ast_["body"]);
 
           if (node != Json())
-            type = node["annotation"]["id"];
+            inferred_type = node["annotation"]["id"];
         }
 
+        const auto &value_type = element["value"]["_type"];
+
         // Get type from RHS constant
-        if (element["value"]["_type"] == "Constant")
+        if (value_type == "Constant")
         {
-          type = get_type_from_constant(element["value"]);
+          inferred_type = get_type_from_constant(element["value"]);
         }
         else if (
-          element["value"]["_type"] == "UnaryOp" &&
-          element["value"]["operand"]["_type"] ==
-            "Constant") // Handle negative numbers
+          value_type == "UnaryOp" && element["value"]["operand"]["_type"] ==
+                                       "Constant") // Handle negative numbers
         {
-          type = get_type_from_constant(element["value"]["operand"]);
+          inferred_type = get_type_from_constant(element["value"]["operand"]);
         }
 
         // Get type from RHS variable
-        else if (
-          element["value"]["_type"] == "Name" ||
-          element["value"]["_type"] == "Subscript")
+        else if (value_type == "Name" || value_type == "Subscript")
         {
           std::string rhs_var_name;
-          if (element["value"]["_type"] == "Name")
+          if (value_type == "Name")
             rhs_var_name = element["value"]["id"];
-          else if (element["value"]["_type"] == "Subscript")
+          else if (value_type == "Subscript")
             rhs_var_name = element["value"]["value"]["id"];
 
           // Find RHS variable declaration in the current scope
@@ -209,34 +223,45 @@ private:
           }
 
           // Get type from RHS type annotation
-          type = rhs_node["annotation"]["id"];
+          inferred_type = rhs_node["annotation"]["id"];
         }
 
         // Get type from RHS binary expression
-        else if (element["value"]["_type"] == "BinOp")
+        else if (value_type == "BinOp")
         {
           std::string got_type = get_type_from_binary_expr(element, body);
           if (!got_type.empty())
-            type = got_type;
+            inferred_type = got_type;
         }
 
         // Get type from constructor call
         else if (
-          element["value"]["_type"] == "Call" &&
+          value_type == "Call" &&
           (json_utils::is_class<Json>(element["value"]["func"]["id"], ast_) ||
            is_builtin_type(element["value"]["func"]["id"]) ||
            is_consensus_type(element["value"]["func"]["id"])))
-          type = element["value"]["func"]["id"];
+          inferred_type = element["value"]["func"]["id"];
+
         else if (
-          element["value"]["_type"] == "Call" &&
+          value_type == "Call" &&
           is_consensus_func(element["value"]["func"]["id"]))
-          type = get_type_from_consensus_func(element["value"]["func"]["id"]);
+          inferred_type =
+            get_type_from_consensus_func(element["value"]["func"]["id"]);
+
+        // Get type from function return
+        else if (
+          value_type == "Call" &&
+          !is_model_func(element["value"]["func"]["id"]))
+        {
+          std::string func_name = element["value"]["func"]["id"];
+          inferred_type = get_function_return_type(func_name, ast_);
+        }
         else
           continue;
 
-        if (type.empty())
+        if (inferred_type.empty())
         {
-          log_status("Type undefined for:\n{}", element.dump(2).c_str());
+          log_error("Type undefined for:\n{}", element.dump(2).c_str());
           abort();
         }
 
@@ -263,13 +288,14 @@ private:
           {"_type", target["_type"]},
           {"col_offset", col_offset},
           {"ctx", {{"_type", "Load"}}},
-          {"end_col_offset", col_offset + type.size()},
+          {"end_col_offset", col_offset + inferred_type.size()},
           {"end_lineno", target["end_lineno"]},
-          {"id", type},
+          {"id", inferred_type},
           {"lineno", target["lineno"]}};
 
         element["end_col_offset"] =
-          element["end_col_offset"].template get<int>() + type.size() + 1;
+          element["end_col_offset"].template get<int>() + inferred_type.size() +
+          1;
         element["end_lineno"] = element["lineno"];
         element["simple"] = 1;
 
@@ -282,10 +308,11 @@ private:
 
         // Update value fields
         element["value"]["col_offset"] =
-          element["value"]["col_offset"].template get<int>() + type.size() + 1;
+          element["value"]["col_offset"].template get<int>() +
+          inferred_type.size() + 1;
         element["value"]["end_col_offset"] =
-          element["value"]["end_col_offset"].template get<int>() + type.size() +
-          1;
+          element["value"]["end_col_offset"].template get<int>() +
+          inferred_type.size() + 1;
 
         /* Adjust column offset node on lines involving function
          * calls with arguments */
@@ -294,9 +321,9 @@ private:
           for (auto &arg : element["value"]["args"])
           {
             arg["col_offset"] =
-              arg["col_offset"].template get<int>() + type.size() + 1;
-            arg["end_col_offset"] =
-              arg["end_col_offset"].template get<int>() + type.size() + 1;
+              arg["col_offset"].template get<int>() + inferred_type.size() + 1;
+            arg["end_col_offset"] = arg["end_col_offset"].template get<int>() +
+                                    inferred_type.size() + 1;
           }
         }
         // Adjust column offset in function call node
@@ -304,10 +331,10 @@ private:
         {
           element["value"]["func"]["col_offset"] =
             element["value"]["func"]["col_offset"].template get<int>() +
-            type.size() + 1;
+            inferred_type.size() + 1;
           element["value"]["func"]["end_col_offset"] =
             element["value"]["func"]["end_col_offset"].template get<int>() +
-            type.size() + 1;
+            inferred_type.size() + 1;
         }
       }
     }

@@ -18,4 +18,8 @@ std::unique_ptr<clang::ASTUnit> buildASTs(
   const std::string &intrinsics,
   const std::vector<std::string> &compiler_args);
 
+void mergeASTs(
+  const std::unique_ptr<clang::ASTUnit> &FromUnit,
+  std::unique_ptr<clang::ASTUnit> &ToUnit);
+
 #endif /* CLANG_C_FRONTEND_AST_BUILD_AST_H_ */

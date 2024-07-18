@@ -1556,6 +1556,7 @@ void goto_convertt::convert_return(
   {
     if (!new_code.has_return_value())
     {
+      code.dump();
       log_error("function must return value");
       abort();
     }

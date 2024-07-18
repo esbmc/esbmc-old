@@ -28,8 +28,13 @@ class Preprocessor(ast.NodeTransformer):
     def visit_For(self, node):
         # Transformation from for to while if the iterator is range
         if isinstance(node.iter, ast.Call) and isinstance(node.iter.func, ast.Name) and node.iter.func.id == "range":
-            start = node.iter.args[0]  # Start of the range
-            end = node.iter.args[1]    # End of the range
+
+            if len(node.iter.args) > 1:
+                start = node.iter.args[0]  # Start of the range
+                end = node.iter.args[1]    # End of the range
+            elif len(node.iter.args) == 1:
+                start = ast.Constant(value=0)
+                end = node.iter.args[0]
 
             # Check if step is provided in range, otherwise default to 1
             if len(node.iter.args) > 2:

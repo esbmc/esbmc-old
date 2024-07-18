@@ -47,7 +47,6 @@ if (${LLVM_VERSION_MAJOR} LESS 11)
 else()
   message(STATUS "LLVM version: ${LLVM_VERSION}")
 endif()
-# BUG: For some reason, ESBMC is not linking with Systems LLVM [fb: is this still the case?]
 
 message(STATUS "Clang found in: ${CLANG_INSTALL_PREFIX}")
 if (CLANG_LINK_CLANG_DYLIB AND NOT BUILD_STATIC)

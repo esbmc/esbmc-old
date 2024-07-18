@@ -42,6 +42,23 @@ void clang_c_adjust::adjust_code(codet &code)
     adjust_decl_block(code);
   else
   {
+    if (statement == "expression" && is_array_like(code.op0().type()))
+    {
+      /* An array-type'd statement like "y->ss;" where y is a pointer to
+       *
+       *   struct { int ss[128]; }
+       *
+       * is not assumed to not exist by the dereference code. Thus, convert it
+       * to
+       *
+       *   &y->ss[0];
+       *
+       * instead. This is fine, because the value of the expression statement is
+       * unused.
+       */
+      exprt &op = code.op0();
+      op = address_of_exprt(index_exprt(op, constant_exprt(0, index_type())));
+    }
     adjust_operands(code);
   }
 }

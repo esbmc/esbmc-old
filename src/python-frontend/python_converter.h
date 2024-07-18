@@ -38,13 +38,14 @@ private:
   exprt get_block(const nlohmann::json &ast_block);
 
   const nlohmann::json
-  find_var_decl(const std::string &var_name, const nlohmann::json &json);
+  find_var_decl(const std::string &var_name, const nlohmann::json &json) const;
   void adjust_statement_types(exprt &lhs, exprt &rhs) const;
   std::string create_symbol_id() const;
   std::string create_symbol_id(const std::string &filename) const;
   bool is_constructor_call(const nlohmann::json &json);
   typet get_typet(const std::string &ast_type, size_t type_size = 0);
   typet get_typet(const nlohmann::json &elem);
+  std::string get_var_type(const std::string &var_name) const;
   void get_attributes_from_self(
     const nlohmann::json &method_body,
     struct_typet &clazz);

@@ -36,6 +36,8 @@ public:
 
   void to_irep(irept &dest) const;
   void from_irep(const irept &src);
+
+  irep_idt get_function_name() const;
 };
 
 std::ostream &operator<<(std::ostream &out, const symbolt &symbol);

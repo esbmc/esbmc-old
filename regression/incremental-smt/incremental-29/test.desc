@@ -1,0 +1,4 @@
+CORE
+main.c
+--context-bound 2 --smt-during-symex --smt-symex-assert --smt-thread-guard --smt-symex-guard --bitwuzla
+^VERIFICATION SUCCESSFUL$

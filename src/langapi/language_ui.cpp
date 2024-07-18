@@ -13,9 +13,7 @@ language_uit::language_uit() : ns(context)
 }
 
 language_uit::language_uit(language_uit &&o) noexcept
-  : language_files(std::move(o.language_files)),
-    context(std::move(o.context)),
-    ns(context)
+  : context(std::move(o.context)), ns(context)
 {
   // Ahem
   migrate_namespace_lookup = &ns;
@@ -23,7 +21,6 @@ language_uit::language_uit(language_uit &&o) noexcept
 
 language_uit &language_uit::operator=(language_uit &&o) noexcept
 {
-  language_files = std::move(o.language_files);
   context = std::move(o.context);
   ns = namespacet(context);
 
@@ -65,17 +62,15 @@ bool language_uit::parse(const std::string &filename)
 
   log_progress("Parsing {}", filename);
 
-  std::pair<language_filest::filemapt::iterator, bool> result =
-    language_files.filemap.emplace(
-      std::piecewise_construct,
-      std::forward_as_tuple(filename),
-      std::tuple<>{});
-  assert(result.second);
+  auto it = langmap.find(lang);
+  if (it == langmap.end())
+  {
+    auto emplace = langmap.emplace(lang, new_language(lang));
+    assert(emplace.second);
+    it = emplace.first;
+  }
 
-  language_filet &lf = result.first->second;
-  lf.filename = filename;
-  lf.language = new_language(lang);
-  if (!lf.language)
+  if (!it->second)
   {
     log_error(
       "{}frontend for {} was not built on this version of ESBMC",
@@ -83,15 +78,12 @@ bool language_uit::parse(const std::string &filename)
       language_name(lang));
     return true;
   }
-  languaget &language = *lf.language;
 
-  if (language.parse(filename))
+  if (it->second->parse(filename))
   {
     log_error("PARSING ERROR");
     return true;
   }
-
-  lf.get_modules();
 
   return false;
 }
@@ -100,22 +92,24 @@ bool language_uit::typecheck()
 {
   log_progress("Converting");
 
-  if (language_files.typecheck(context))
-  {
-    log_error("CONVERSION ERROR");
-    return true;
-  }
+  for (auto &it : langmap)
+    if (it.second->typecheck(context, ""))
+    {
+      log_error("CONVERSION ERROR");
+      return true;
+    }
 
   return false;
 }
 
 bool language_uit::final()
 {
-  if (language_files.final(context))
-  {
-    log_error("CONVERSION ERROR");
-    return true;
-  }
+  for (auto &it : langmap)
+    if (it.second->final(context))
+    {
+      log_error("CONVERSION ERROR");
+      return true;
+    }
 
   return false;
 }

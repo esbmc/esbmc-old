@@ -23,8 +23,8 @@ public:
     const std::string &_target_func);
   virtual ~pattern_checker() = default;
 
-  bool do_pattern_check();
-  bool start_pattern_based_check(const nlohmann::json &func);
+  void do_pattern_check();
+  void start_pattern_based_check(const nlohmann::json &func);
 
   // Authorization through Tx origin
   void check_authorization_through_tx_origin(const nlohmann::json &func);

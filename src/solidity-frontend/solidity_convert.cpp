@@ -11,6 +11,7 @@
 #include <regex>
 
 #include <fstream>
+#include <iostream>
 
 solidity_convertert::solidity_convertert(
   contextt &_context,
@@ -19,7 +20,7 @@ solidity_convertert::solidity_convertert(
   const std::string &_contract_path)
   : context(_context),
     ns(context),
-    src_ast_json(_ast_json),
+    src_ast_json_array(_ast_json),
     sol_func(_sol_func),
     contract_path(_contract_path),
     global_scope_id(0),
@@ -43,6 +44,9 @@ bool solidity_convertert::convert()
   //  1. First, we perform pattern-based verificaiton
   //  2. Then we populate the context with symbols annotated based on the each AST node, and hence prepare for the GOTO conversion.
 
+  // First, we handle the multiple JSON files(imported files)
+  // The imported files are stored in src_ast_json_array and we merge them into a single JSON file
+  multi_json_file();
   if (!src_ast_json.contains(
         "nodes")) // check json file contains AST nodes as Solidity might change
     assert(!"JSON file does not contain any AST nodes");
@@ -73,8 +77,7 @@ bool solidity_convertert::convert()
       assert(itr->contains("nodes"));
       auto pattern_check =
         std::make_unique<pattern_checker>((*itr)["nodes"], sol_func);
-      if (pattern_check->do_pattern_check())
-        return true; // 'true' indicates something goes wrong.
+      pattern_check->do_pattern_check();
     }
   }
   assert(found_contract_def && "No contracts were found in the program.");
@@ -195,7 +198,136 @@ bool solidity_convertert::convert()
       return true;
   }
 
+  // otherwise, we verify the target function.
   return false; // 'false' indicates successful completion.
+}
+
+void solidity_convertert::multi_json_file()
+{
+  // Import relationship diagram
+  std::unordered_map<std::string, std::unordered_set<std::string>> import_graph;
+  // Path to JSON object mapping
+  std::unordered_map<std::string, nlohmann::json> path_to_json;
+  // Constructing an import relationship diagram
+  for (auto &ast_json : src_ast_json_array)
+  {
+    std::string path = ast_json["absolutePath"];
+    path_to_json[path] = ast_json;
+    std::unordered_set<std::string> imports;
+    // Extract the import path from the ImportDirective node.
+    for (const auto &node : ast_json["nodes"])
+    {
+      if (node["nodeType"] == "ImportDirective")
+      {
+        std::string import_path = node["absolutePath"];
+        imports.insert(import_path);
+      }
+    }
+    import_graph[path] = imports;
+  }
+
+  // Perform topological sorting
+  std::vector<nlohmann::json> sorted_json_files =
+    topological_sort(import_graph, path_to_json);
+
+  // Update order of src_ast_json_array
+  src_ast_json_array = sorted_json_files;
+
+  // src_ast_json_array[0] means the .sol file that is being verified and not being imported.
+  src_ast_json = src_ast_json_array[0];
+
+  // The initial part of the nodes in a single AST includes an import information description section
+  // and a version description section.This is followed by all the information that needs to be verified.
+  // Therefore, the rest of the key nodes need to be inserted sequentially thereafter
+  // It also means before the first ContractDefinition node.
+  size_t insert_pos = 0;
+  for (size_t i = 0; i < src_ast_json["nodes"].size(); ++i)
+  {
+    if (src_ast_json["nodes"][i]["nodeType"] == "ContractDefinition")
+    {
+      insert_pos = i;
+      break;
+    }
+  }
+
+  for (size_t i = 1; i < src_ast_json_array.size(); ++i)
+  {
+    nlohmann::json &imported_part = src_ast_json_array[i];
+    // Traverse nodes in the imported part
+    for (const auto &node : imported_part["nodes"])
+    {
+      if (
+        node["nodeType"] == "ContractDefinition" &&
+        (node["contractKind"] == "contract" ||
+         node["contractKind"] == "interface"))
+      {
+        // Add the node before the first ContractDefinition node
+        // chose to insert it here instead of at the end because splitting a piece of Solidity code(use import)
+        // into multiple files results in the import order of contracts and interfaces in the AST file
+        // being reversed compared to the unsplit version.
+        src_ast_json["nodes"].insert(
+          src_ast_json["nodes"].begin() + insert_pos, node);
+        ++insert_pos; // Adjust the insert position for the next node
+      }
+    }
+  }
+}
+
+std::vector<nlohmann::json> solidity_convertert::topological_sort(
+  std::unordered_map<std::string, std::unordered_set<std::string>> &graph,
+  std::unordered_map<std::string, nlohmann::json> &path_to_json)
+{
+  std::unordered_map<std::string, int> in_degree;
+  std::queue<std::string> zero_in_degree_queue;
+  std::vector<nlohmann::json> sorted_files;
+  //Topological sorting function for sorting files according to import relationships
+  // Calculate the in-degree for each node
+  for (const auto &pair : graph)
+  {
+    if (in_degree.find(pair.first) == in_degree.end())
+    {
+      in_degree[pair.first] = 0;
+    }
+    for (const auto &neighbor : pair.second)
+    {
+      if (pair.first != neighbor)
+      {
+        // Ignore the case of importing itself.
+        in_degree[neighbor]++;
+      }
+    }
+  }
+
+  // Find all the nodes with 0 entry and add them to the queue.
+  for (const auto &pair : in_degree)
+  {
+    if (pair.second == 0)
+    {
+      zero_in_degree_queue.push(pair.first);
+    }
+  }
+  // Process nodes in the queue
+  while (!zero_in_degree_queue.empty())
+  {
+    std::string node = zero_in_degree_queue.front();
+    zero_in_degree_queue.pop();
+    // add the node's corresponding JSON file to the sorted result
+    sorted_files.push_back(path_to_json[node]);
+    // Update the in-degree of neighbouring nodes and add the new node with in-degree 0 to the queue
+    for (const auto &neighbor : graph[node])
+    {
+      if (node != neighbor)
+      { // Ignore the case of importing itself.
+        in_degree[neighbor]--;
+        if (in_degree[neighbor] == 0)
+        {
+          zero_in_degree_queue.push(neighbor);
+        }
+      }
+    }
+  }
+
+  return sorted_files;
 }
 
 bool solidity_convertert::convert_ast_nodes(const nlohmann::json &contract_def)
@@ -687,11 +819,59 @@ bool solidity_convertert::get_noncontract_defition(nlohmann::json &ast_node)
   }
   else if (node_type == "EventDefinition")
   {
+    add_empty_function_body(ast_node);
     if (get_function_definition(ast_node))
       return true;
   }
-
+  else if (node_type == "ContractDefinition")
+  {
+    add_empty_function_body(ast_node);
+  }
   return false;
+}
+
+// add a "body" node to funcitons within interfacae && abstract && event
+// the idea is to utilize the function-handling APIs.
+void solidity_convertert::add_empty_function_body(nlohmann::json &ast_node)
+{
+  if (ast_node["nodeType"] == "EventDefinition")
+  {
+    // for event-definition
+    if (!ast_node.contains("body"))
+
+      ast_node["body"] = {
+        {"nodeType", "Block"},
+        {"statements", nlohmann::json::array()},
+        {"src", ast_node["src"]}};
+  }
+  else if (ast_node["contractKind"] == "interface")
+  {
+    // For interface: functions have no body
+    for (auto &subNode : ast_node["nodes"])
+    {
+      if (
+        subNode["nodeType"] == "FunctionDefinition" &&
+        !subNode.contains("body"))
+        subNode["body"] = {
+          {"nodeType", "Block"},
+          {"statements", nlohmann::json::array()},
+          {"src", ast_node["src"]}};
+    }
+  }
+  else if (ast_node["abstract"] == true)
+  {
+    // For abstract: functions may or may not have body
+    for (auto &subNode : ast_node["nodes"])
+    {
+      if (
+        subNode["nodeType"] == "FunctionDefinition" &&
+        !subNode.contains("body"))
+        subNode["body"] = {
+          {"nodeType", "Block"},
+          {"statements", nlohmann::json::array()},
+          {"src", ast_node["src"]}};
+    }
+  }
 }
 
 void solidity_convertert::add_enum_member_val(nlohmann::json &ast_node)
@@ -850,11 +1030,6 @@ bool solidity_convertert::get_function_definition(
   // Order matters! do not change!
   // 1. Check fd.isImplicit() --- skipped since it's not applicable to Solidity
   // 2. Check fd.isDefined() and fd.isThisDeclarationADefinition()
-  if (
-    ast_node.contains("implemented") &&
-    !ast_node
-      ["implemented"]) // TODO: for interface function, it's just a definition. Add something like "&& isInterface_JustDefinition()"
-    return false;
 
   // Check intrinsic functions
   if (check_intrinsic_function(ast_node))
@@ -970,28 +1145,17 @@ bool solidity_convertert::get_function_definition(
   added_symbol.type = type;
 
   // 12. Convert body and embed the body into the same symbol
-  if (ast_node.contains("body"))
+  // skip for 'unimplemented' functions which has no body,
+  // e.g. asbstract/interface, the symbol value would be left as unset
+  if (
+    ast_node.contains("body") ||
+    (ast_node.contains("implemented") && ast_node["implemented"] == true))
   {
     exprt body_exprt;
     if (get_block(ast_node["body"], body_exprt))
       return true;
 
     added_symbol.value = body_exprt;
-  }
-  else
-  {
-    //! assume it's event-definition
-    if (ast_node["nodeType"] != "EventDefinition")
-    {
-      log_error(
-        "Expect nodeType=EventDefinition, got {}",
-        ast_node["nodeType"].get<std::string>());
-      return true;
-    }
-
-    // construct an empty body
-    code_blockt _block;
-    added_symbol.value = _block;
   }
 
   //assert(!"done - finished all expr stmt in function?");
@@ -1122,6 +1286,7 @@ bool solidity_convertert::get_block(
     get_expr(block["expression"], new_expr);
     break;
   }
+  case SolidityGrammar::BlockT::BlockTError:
   default:
   {
     assert(!"Unimplemented type in rule block");
@@ -4448,7 +4613,7 @@ bool solidity_convertert::get_mapping_definition(
 
   // get address: &m
   exprt address_of = address_of_exprt(mapping_ins);
-  call_expr.arguments().push_back(mapping_ins);
+  call_expr.arguments().push_back(address_of);
 
   // get block
   code_blockt _block;
@@ -4982,7 +5147,7 @@ solidity_convertert::get_src_from_json(const nlohmann::json &ast_node)
   }
   default:
   {
-    assert(!"Unsupported node type when getting src from JSON");
+    log_error("Unsupported node type when getting src from JSON");
     abort();
   }
   }
@@ -5213,13 +5378,6 @@ solidity_convertert::find_decl_ref(int ref_decl_id, std::string &contract_name)
     const nlohmann::json &current_func = *current_functionDecl;
     if (!current_func.contains("body"))
     {
-      //! assume it's an event-definition
-      if (
-        current_func.contains("nodeType") &&
-        current_func["nodeType"] == "EventDefinition")
-      {
-        return current_func;
-      }
       log_error(
         "Unable to find the corresponding local variable decl. Current "
         "function "
@@ -6165,8 +6323,10 @@ bool solidity_convertert::multi_contract_verification()
         return true;
     }
     else
+    {
       //! Assume is not a contract (e.g. error type)
       continue;
+    }
 
     // 1.2 construct a "case n"
     exprt case_cond = constant_exprt(

@@ -1,4 +1,4 @@
 KNOWNBUG
 main.c
---k-induction
+--k-induction --std=gnu89
 ^VERIFICATION SUCCESSFUL$

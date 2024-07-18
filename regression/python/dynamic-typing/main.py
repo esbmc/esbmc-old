@@ -12,3 +12,8 @@ x = (v + y)//2
 
 f = -1
 
+def bar() -> int:
+    return 1
+
+a = bar() # Infer from function return
+assert a == 1

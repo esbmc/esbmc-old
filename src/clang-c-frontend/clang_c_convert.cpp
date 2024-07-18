@@ -31,12 +31,12 @@ CC_DIAGNOSTIC_POP()
 
 clang_c_convertert::clang_c_convertert(
   contextt &_context,
-  std::vector<std::unique_ptr<clang::ASTUnit>> &_ASTs,
+  std::unique_ptr<clang::ASTUnit> &_AST,
   irep_idt _mode)
   : ASTContext(nullptr),
     context(_context),
     ns(context),
-    ASTs(_ASTs),
+    AST(_AST),
     mode(_mode),
     anon_symbol("clang_c_convertert::"),
     current_scope_var_num(1),
@@ -75,12 +75,9 @@ bool clang_c_convertert::convert_builtin_types()
 
 bool clang_c_convertert::convert_top_level_decl()
 {
-  // Iterate through each translation unit and their global symbols, creating
-  // symbols as we go.
-  for (auto const &translation_unit : ASTs)
+  if (AST)
   {
-    // Update ASTContext as it changes for each source file
-    ASTContext = &(*translation_unit).getASTContext();
+    ASTContext = &AST->getASTContext();
 
     // This is the whole translation unit. We don't represent it internally
     exprt dummy_decl;

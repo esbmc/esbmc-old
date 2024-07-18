@@ -131,3 +131,32 @@ void symbolt::from_irep(const irept &src)
   file_local = src.file_local();
   is_extern = src.is_extern();
 }
+
+irep_idt symbolt::get_function_name() const
+{
+  irep_idt func_name = location.get_function();
+  if (!func_name.empty())
+    return func_name;
+
+  const std::string &symbol_id = id.as_string();
+
+  // Find the position of "F@"
+  size_t posF = symbol_id.find("F@");
+
+  if (posF == std::string::npos)
+    return ""; // Return an empty string if "F@" is not found
+
+  posF += 2; // Advance beyond "F@"
+
+  // Find the position of the last '@'
+  size_t posLastAt = symbol_id.rfind('@');
+
+  // Check if there is an '@' after the function name (e.g.: c:string.c@1290@F@strcmp@c1)
+  if (posLastAt != std::string::npos && posLastAt > posF)
+    return symbol_id.substr(
+      posF,
+      posLastAt - posF); // Extract the content between "F@" and the last '@'
+
+  return symbol_id.substr(
+    posF); // If there is no '@' after the function name (e.g: c:string.c@1290@F@strcmp), return from "F@"
+}
