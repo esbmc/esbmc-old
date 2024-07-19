@@ -59,7 +59,7 @@ protected:
   bool get_struct_class(const nlohmann::json &ast_node);
   void add_enum_member_val(nlohmann::json &ast_node);
   bool get_error_definition(const nlohmann::json &ast_node);
-  void add_empty_function_body(nlohmann::json &ast_node);
+  void add_empty_body_node(nlohmann::json &ast_node);
 
   // handle the constructor
   bool add_implicit_constructor(const std::string &contract_name);
