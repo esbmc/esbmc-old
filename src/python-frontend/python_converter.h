@@ -25,6 +25,7 @@ private:
   void get_function_definition(const nlohmann::json &function_node);
   void
   get_class_definition(const nlohmann::json &class_node, codet &target_block);
+  std::string get_operand_type(const nlohmann::json &element);
 
   locationt get_location_from_decl(const nlohmann::json &ast_node);
   exprt get_expr(const nlohmann::json &element);

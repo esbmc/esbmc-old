@@ -13,6 +13,10 @@ def check_usage():
         print("Usage: python astgen.py <file path> <output directory>")
         sys.exit(2)
 
+def is_imported_model(module_name):
+    models = ["math"]
+    return module_name in models
+
 
 def import_module_by_name(module_name):
     try:
@@ -52,8 +56,12 @@ def process_imports(node, output_dir):
         imported_elements = node.names
 
     # Check if module is available/installed
-    module = import_module_by_name(module_name)
-    filename = module.__file__
+    if is_imported_model(module_name):
+        models_dir = os.path.join(output_dir, "models")
+        filename = os.path.join(models_dir, module_name + ".py")
+    else:
+        module = import_module_by_name(module_name)
+        filename = module.__file__
 
     # Add the full path recovered from importlib to the import node
     node.full_path = filename
@@ -140,9 +148,14 @@ def main():
 
     # Iterate over all .py files in the directory
     for python_file in glob.glob(os.path.join(models_dir, "*.py")):
+        filename = os.path.basename(python_file)
+        module_name = filename[:-3]
+
+        if is_imported_model(module_name):
+            continue;
+
         with open(python_file) as model:
             model_tree = ast.parse(model.read())
-            filename = os.path.basename(python_file)
             # Generate JSON from AST for the memory models.
             generate_ast_json(model_tree, filename, None, output_dir)
 

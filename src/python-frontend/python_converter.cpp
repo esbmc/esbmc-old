@@ -285,21 +285,43 @@ std::string python_converter::create_symbol_id() const
   return create_symbol_id(python_filename);
 }
 
+// Get the type of an operand in binary operations
+std::string python_converter::get_operand_type(const nlohmann::json &element)
+{
+  // Operand is a variable
+  if (element["_type"] == "Name")
+    return get_var_type(element["id"]);
+
+  // Operand is a literal
+  if (element["_type"] == "Constant")
+  {
+    const auto &value = element["value"];
+    if (value.is_string())
+      return "str";
+    if (value.is_number_integer() || value.is_number_unsigned())
+      return "int";
+    else if (value.is_boolean())
+      return "bool";
+    else if (value.is_number_float())
+      return "float";
+  }
+  return std::string();
+}
+
 exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
 {
-  exprt lhs;
-  if (element.contains("left"))
-    lhs = get_expr(element["left"]);
-  else if (element.contains("target"))
-    lhs = get_expr(element["target"]);
+  auto left = (element.contains("left")) ? element["left"] : element["target"];
 
-  exprt rhs;
+  decltype(left) right;
   if (element.contains("right"))
-    rhs = get_expr(element["right"]);
+    right = element["right"];
   else if (element.contains("comparators"))
-    rhs = get_expr(element["comparators"][0]);
+    right = element["comparators"][0];
   else if (element.contains("value"))
-    rhs = get_expr(element["value"]);
+    right = element["value"];
+
+  exprt lhs = get_expr(left);
+  exprt rhs = get_expr(right);
 
   auto to_side_effect_call = [](exprt &expr) {
     side_effect_expr_function_callt side_effect;
@@ -327,8 +349,8 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
   assert(!op.empty());
 
   // Get LHS and RHS types from variable annotation
-  std::string lhs_type = get_var_type(lhs.name().as_string());
-  std::string rhs_type = get_var_type(rhs.name().as_string());
+  std::string lhs_type = get_operand_type(left);
+  std::string rhs_type = get_operand_type(right);
 
   // If RHS is a string literal, like x = "foo", then we determine the type from the JSON value
   if (
@@ -339,29 +361,94 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
     rhs_type = "str";
   }
 
-  if (op == "Eq" && lhs_type == "str" && rhs_type == "str")
+  if (lhs_type == "str" && rhs_type == "str")
   {
-    if (rhs.type() != lhs.type())
-      return gen_boolean(false);
+    // Strings comparison
+    if (op == "Eq")
+    {
+      if (rhs.type() != lhs.type())
+        return gen_boolean(false);
 
-    array_typet &arr_type = static_cast<array_typet &>(lhs.type());
-    BigInt str_size =
-      binary2integer(arr_type.size().value().as_string(), false);
+      array_typet &arr_type = static_cast<array_typet &>(lhs.type());
+      BigInt str_size =
+        binary2integer(arr_type.size().value().as_string(), false);
 
-    // call strncmp to compare strings
-    symbolt *strncmp = context.find_symbol("c:@F@strncmp");
-    assert(strncmp);
-    side_effect_expr_function_callt sideeffect;
-    sideeffect.function() = symbol_expr(*strncmp);
-    sideeffect.arguments().push_back(lhs); // passing lhs to strncmp
-    sideeffect.arguments().push_back(rhs); // passing rhs to strncmp
-    sideeffect.arguments().push_back(
-      from_integer(str_size, long_uint_type())); // passing n to strncmp
-    sideeffect.location() = get_location_from_decl(element);
-    sideeffect.type() = int_type();
+      // call strncmp to compare strings
+      symbolt *strncmp = context.find_symbol("c:@F@strncmp");
+      assert(strncmp);
+      side_effect_expr_function_callt sideeffect;
+      sideeffect.function() = symbol_expr(*strncmp);
+      sideeffect.arguments().push_back(lhs); // passing lhs to strncmp
+      sideeffect.arguments().push_back(rhs); // passing rhs to strncmp
+      sideeffect.arguments().push_back(
+        from_integer(str_size, long_uint_type())); // passing n to strncmp
+      sideeffect.location() = get_location_from_decl(element);
+      sideeffect.type() = int_type();
 
-    lhs = sideeffect;
-    rhs = gen_zero(int_type());
+      lhs = sideeffect;
+      rhs = gen_zero(int_type());
+    }
+    // Strings concatenation
+    else if (op == "Add")
+    {
+      array_typet lhs_str_type = static_cast<array_typet &>(lhs.type());
+      BigInt lhs_str_size =
+        binary2integer(lhs_str_type.size().value().c_str(), true);
+
+      array_typet rhs_str_type = static_cast<array_typet &>(rhs.type());
+      BigInt rhs_str_size =
+        binary2integer(rhs_str_type.size().value().c_str(), true);
+
+      BigInt concat_str_size = lhs_str_size + rhs_str_size;
+
+      typet t = get_typet("str", concat_str_size.to_uint64());
+      exprt expr = gen_zero(t);
+
+      unsigned int i = 0;
+
+      auto get_value_from_symbol = [&](const std::string &symbol_id, exprt &e) {
+        symbolt *symbol = context.find_symbol(symbol_id);
+        assert(symbol);
+        // Copy symbol value
+        for (const exprt &ch : symbol->value.operands())
+          e.operands().at(i++) = ch;
+      };
+
+      auto get_value_from_json = [&](const nlohmann::json &elem, exprt &e) {
+        const std::string &value = elem["value"].get<std::string>();
+        std::vector<uint8_t> string_literal =
+          std::vector<uint8_t>(std::begin(value), std::end(value));
+
+        typet &char_type = t.subtype();
+
+        // Copy JSON value
+        for (uint8_t &ch : string_literal)
+        {
+          exprt char_value = constant_exprt(
+            integer2binary(BigInt(ch), bv_width(char_type)),
+            integer2string(BigInt(ch)),
+            char_type);
+
+          e.operands().at(i++) = char_value;
+        }
+      };
+
+      // If LHS is a variable
+      if (left["_type"] == "Name")
+        get_value_from_symbol(lhs.identifier().as_string(), expr);
+      // If LHS is a literal
+      else if (left["_type"] == "Constant")
+        get_value_from_json(left, expr);
+
+      // If RHS is a variable
+      if (right["_type"] == "Name")
+        get_value_from_symbol(rhs.identifier().as_string(), expr);
+      // If RHS is a literal
+      else if (right["_type"] == "Constant")
+        get_value_from_json(right, expr);
+
+      return expr;
+    }
   }
 
   adjust_statement_types(lhs, rhs);
@@ -1210,25 +1297,27 @@ void python_converter::get_var_assign(
   const nlohmann::json &ast_node,
   codet &target_block)
 {
+  std::string lhs_type("");
   if (ast_node.contains("annotation"))
   {
     // Get type from annotation node
     size_t type_size = get_type_size(ast_node);
-    const auto &annotated_type = ast_node["annotation"]["id"];
-    current_element_type = get_typet(annotated_type, type_size);
+    lhs_type = ast_node["annotation"]["id"];
+    current_element_type = get_typet(lhs_type, type_size);
   }
   else
   {
     // Get type from declaration node
     const std::string &var_name =
       ast_node["targets"][0]["id"].get<std::string>();
-    const std::string &var_type = get_var_type(var_name);
-    if (var_type.empty())
+    lhs_type = get_var_type(var_name);
+
+    if (lhs_type.empty())
     {
       log_error("Type undefined for {}", var_name);
       abort();
     }
-    current_element_type = get_typet(var_type);
+    current_element_type = get_typet(lhs_type);
   }
 
   exprt lhs;
@@ -1307,7 +1396,24 @@ void python_converter::get_var_assign(
   if (has_value && rhs != exprt("_init_undefined"))
   {
     if (lhs_symbol)
+    {
+      if (lhs_type == "str")
+      {
+        array_typet &arr_type =
+          static_cast<array_typet &>(current_element_type);
+
+        /* When a string is assigned the result of a concatenation, we initially
+         * create the LHS type as a zero-size array: "current_element_type = get_typet(lhs_type, type_size);"
+         * After parsing the RHS, we need to adjust the LHS type size to match
+         * the size of the resulting RHS string.*/
+
+        // If the size of the LHS type is zero, update the LHS type with the type of the RHS.
+        if (std::stoi(arr_type.size().value().as_string()) == 0)
+          lhs_symbol->type = rhs.type();
+      }
+
       lhs_symbol->value = rhs;
+    }
 
     /* If the right-hand side (rhs) of the assignment is a function call, such as: x : int = func()
      * we need to adjust the left-hand side (lhs) of the function call to refer to the lhs of the current assignment.
