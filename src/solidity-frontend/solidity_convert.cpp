@@ -715,6 +715,8 @@ bool solidity_convertert::get_var_decl(
   }
 
   // store state variable, which will be initialized in the constructor
+  // note that for the state variables that do not have initializer
+  // we have already set it as zero value
   if (is_state_var)
     initializers.insert(&added_symbol);
 
@@ -1116,10 +1118,9 @@ bool solidity_convertert::move_initializer_to_ctor(
   symbolt &sym = *context.find_symbol(ctor_id);
 
   // get this pointer
-  std::string this_id = ctor_id + "#this";
-  if (context.find_symbol(this_id) == nullptr)
+  exprt base;
+  if (get_func_decl_this_ref(ctor_id, base))
     return true;
-  exprt base = symbol_expr(*context.find_symbol(this_id));
 
   for (const auto &i : initializers)
   {
@@ -1171,8 +1172,7 @@ bool solidity_convertert::get_instantiation_ctor_call(
   auto &added_symbol = *move_symbol_to_context(symbol);
 
   // add empty body
-  code_blockt body_exprt = code_blockt();
-  added_symbol.value = body_exprt;
+  added_symbol.value = nil_exprt();
 
   // add this pointer as the first function param
   get_function_this_pointer_param(
@@ -3843,9 +3843,17 @@ bool solidity_convertert::get_func_decl_this_ref(
   const nlohmann::json &decl,
   exprt &new_expr)
 {
+  assert(!decl.empty());
   std::string func_name, func_id;
   get_function_definition_name(decl, func_name, func_id);
 
+  return get_func_decl_this_ref(func_id, new_expr);
+}
+
+bool solidity_convertert::get_func_decl_this_ref(
+  const std::string &func_id,
+  exprt &new_expr)
+{
   std::string this_id = func_id + "#this";
 
   if (context.find_symbol(this_id) == nullptr)
@@ -6231,20 +6239,29 @@ bool solidity_convertert::get_function_call(
                   * identifier: tag-BB
               * #lvalue: 1
     */
-    assert(to_code_type(func.type()).arguments().size() > 0);
-    const auto tmp_arg = to_code_type(func.type()).arguments().at(0);
-    assert(tmp_arg.get("#base_name").as_string() == "this");
-    exprt temporary = exprt("new_object");
-    temporary.set("#lvalue", true);
-    temporary.type() = tmp_arg.type().subtype();
-    address_of_exprt this_object(temporary);
-    code_typet tmp = to_code_type(func.type());
 
+    code_typet tmp = to_code_type(func.type());
     // populate nil arguements
     call.arguments().resize(
       tmp.arguments().size(), static_cast<const exprt &>(get_nil_irep()));
-    // set this
-    call.arguments().at(0) = this_object;
+
+    if ((func.id() == "member"))
+    {
+      auto this_object = func.op0();
+      // set this
+      call.arguments().at(0) = this_object;
+    }
+    else
+    {
+      const auto tmp_arg = to_code_type(func.type()).arguments().at(0);
+      assert(tmp_arg.get("#base_name").as_string() == "this");
+      exprt temporary = exprt("new_object");
+      temporary.set("#lvalue", true);
+      temporary.type() = tmp_arg.type().subtype();
+      address_of_exprt this_object(temporary);
+      // set this
+      call.arguments().at(0) = this_object;
+    }
   }
   else
   {
