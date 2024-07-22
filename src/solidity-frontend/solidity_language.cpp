@@ -176,19 +176,12 @@ std::string solidity_languaget::temp_c_file()
 {
   // This function populates the temp file so that Clang has a compilation job.
   // Clang needs a job to convert the intrinsics.
-  std::string sol_library = std::string(sol_header) +
-                          std::string(sol_typedef) +
-                          std::string(sol_msg) +
-                          std::string(sol_tx) +
-                          std::string(sol_block) +
-                          std::string(blockhash) +
-                          std::string(gasleft) +
-                          std::string(sol_abi) +
-                          std::string(sol_math) +
-                          std::string(sol_string) +
-                          std::string(sol_byte) +
-                          std::string(sol_mapping) +
-                          std::string(sol_itoa);
+  std::string sol_library =
+    std::string(sol_header) + std::string(sol_typedef) + std::string(sol_msg) +
+    std::string(sol_tx) + std::string(sol_block) + std::string(blockhash) +
+    std::string(gasleft) + std::string(sol_abi) + std::string(sol_math) +
+    std::string(sol_string) + std::string(sol_byte) + std::string(sol_mapping) +
+    std::string(sol_itoa);
   std::string content = sol_library + R"(int main() { return 0; })";
   return content;
 }
