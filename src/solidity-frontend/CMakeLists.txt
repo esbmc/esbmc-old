@@ -1,7 +1,8 @@
 add_library(solidityfrontend_stuff solidity_language.cpp typecast.cpp solidity_convert.cpp solidity_grammar.cpp
-  solidity_convert_literals.cpp pattern_check.cpp)
+  solidity_convert_literals.cpp pattern_check.cpp ../c2goto/library/solidity.c)
 target_include_directories(solidityfrontend_stuff
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../c2goto/headers/__esbmc/solidity.h
     PRIVATE ${CLANG_INCLUDE_DIRS}
     PRIVATE ${Boost_INCLUDE_DIRS}
 )
