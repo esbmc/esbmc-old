@@ -28,10 +28,13 @@ solidity_convertert::solidity_convertert(
     current_scope_var_num(1),
     current_functionDecl(nullptr),
     current_forStmt(nullptr),
+    current_blockDecl(nullptr),
     current_functionName(""),
     current_contractName(""),
     scope_map({}),
     initializers({}),
+    ctor_modifier(empty_json),
+    base_contracts(empty_json),
     tgt_func(config.options.get_option("function")),
     tgt_cnt(config.options.get_option("contract"))
 {
@@ -124,7 +127,7 @@ bool solidity_convertert::convert()
     }
   }
 
-  // second round: populate linearizedBaseList
+  // second round: populate linearizedBaseList & base_contracts
   // this is to obtain the contract name list
   index = 0;
   for (nlohmann::json::iterator itr = nodes.begin(); itr != nodes.end();
@@ -136,7 +139,7 @@ bool solidity_convertert::convert()
     {
       current_contractName = (*itr)["name"].get<std::string>();
 
-      // poplulate linearizedBaseList
+      // store linearizedBaseList
       // this is esstinally the calling order of the constructor
       for (const auto &id : (*itr)["linearizedBaseContracts"].items())
         linearizedBaseList[current_contractName].push_back(
@@ -156,6 +159,11 @@ bool solidity_convertert::convert()
 
     if (node_type == "ContractDefinition") // rule source-unit
     {
+      // store baseContracts
+      // this will be used in ctor initialization
+      if (!(*itr)["baseContracts"].empty())
+        base_contracts = (*itr)["baseContracts"];
+
       current_contractName = (*itr)["name"].get<std::string>();
 
       nlohmann::json &ast_nodes = (*itr)["nodes"];
@@ -193,9 +201,12 @@ bool solidity_convertert::convert()
     current_functionName = "";
     current_functionDecl = nullptr;
     current_forStmt = nullptr;
+    current_blockDecl = nullptr;
     global_scope_id = 0;
     map_init_block.clear();
     initializers.clear();
+    ctor_modifier = empty_json;
+    base_contracts = empty_json;
   }
 
   // Do Verification
@@ -1122,6 +1133,7 @@ bool solidity_convertert::move_initializer_to_ctor(
   if (get_func_decl_this_ref(ctor_id, base))
     return true;
 
+  // queue insert initialization of the state
   for (const auto &i : initializers)
   {
     assert(i->value.id() != "nil");
@@ -1136,6 +1148,100 @@ bool solidity_convertert::move_initializer_to_ctor(
     convert_expression_to_code(_assign);
     // insert before the sym.value.operands
     sym.value.operands().insert(sym.value.operands().begin(), _assign);
+  }
+
+  // queue insert the ctor initializaiton based on the linearizedBaseList
+  std::string this_id = ctor_id + "#this";
+  if (base_contracts != empty_json && context.find_symbol(this_id) != nullptr)
+  {
+    /*
+      Constructors are executed in the following order:
+      1 - Base2
+      2 - Base1
+      3 - Derived3
+      contract Derived3 is Base2, Base1 {
+          constructor() Base1() Base2() {}
+        }
+
+      E.g. 
+        contract DD is BB(3)
+      Result ctor symbol table:
+        Symbol......: c:@S@DD@F@DD#
+        Module......: 1
+        Base name...: DD
+        Mode........: C++
+        Type........: constructor  (struct DD *)
+        Value.......: 
+        {
+          BB((struct BB *)this, 3);
+        }
+    */
+
+    const std::vector<int> &id_list = linearizedBaseList[contract_name];
+    for (auto it = id_list.begin() + 1; it != id_list.end(); ++it)
+    {
+      // handling inheritance
+      // skip the first one as it is the contract itself
+      std::string target_c_name = exportedSymbolsList[*it];
+
+      for (const auto &c_node : base_contracts)
+      {
+        std::string c_name = c_node["baseName"]["name"].get<std::string>();
+        if (c_name != target_c_name)
+          continue;
+
+        std::string c_ctor_id;
+        if (get_ctor_call_id(c_name, c_ctor_id))
+          return true;
+        exprt c_ctor = symbol_expr(*context.find_symbol(c_ctor_id));
+        typet c_type(irept::id_symbol);
+        c_type.identifier(prefix + c_name);
+
+        // search for the parameter list for the constructor
+        // they could be in two places:
+        // - contract DD is BB(3)
+        // or
+        // - constructor() BB(3)
+        nlohmann::json c_param_list_node = empty_json;
+        if (c_node.contains("arguments"))
+          c_param_list_node = c_node;
+        else if (ctor_modifier != empty_json)
+        {
+          for (const auto &c_mdf : ctor_modifier)
+          {
+            if (c_mdf["modifierName"]["name"].get<std::string>() == c_name)
+            {
+              c_param_list_node = c_mdf;
+              break;
+            }
+          }
+        }
+        side_effect_expr_function_callt c_call;
+        if (get_function_call(
+              c_ctor, c_type, empty_json, c_param_list_node, c_call))
+          return true;
+
+        // get this pointer
+        exprt c_this_expr = symbol_expr(*context.find_symbol(this_id));
+        // typecast
+        solidity_gen_typecast(
+          ns, c_this_expr, gen_pointer_type(symbol_typet(prefix + c_name)));
+        // populate this as arg0
+        if (c_param_list_node == empty_json)
+        {
+          // replace arg0
+          c_call.arguments().at(0) = c_this_expr;
+        }
+        else
+        {
+          // insert as arg0
+          c_call.arguments().insert(c_call.arguments().begin(), c_this_expr);
+        }
+
+        convert_expression_to_code(c_call);
+        sym.value.operands().insert(sym.value.operands().begin(), c_call);
+      }
+    }
   }
 
   return false;
@@ -1206,7 +1312,7 @@ bool solidity_convertert::get_instantiation_ctor_call(
 
   // ? we do not need to populate the initializer
   // 2. construct the ctor call
-  if (get_constructor_call(contract_name, id, new_expr))
+  if (get_new_object_ctor_call(contract_name, id, new_expr))
     return true;
 
   return false;
@@ -1249,6 +1355,11 @@ bool solidity_convertert::get_function_definition(
   bool is_ctor = (*current_functionDecl)["name"].get<std::string>() == "" &&
                  (*current_functionDecl).contains("kind") &&
                  (*current_functionDecl)["kind"] == "constructor";
+
+  // store constructor initialization list
+  if (is_ctor && !(*current_functionDecl)["modifiers"].empty())
+    ctor_modifier = (*current_functionDecl)["modifiers"];
+
   if (is_ctor)
   {
     // for construcotr
@@ -2754,7 +2865,7 @@ bool solidity_convertert::get_expr(
 
     // case 3
     exprt call;
-    if (get_constructor_call(expr, call))
+    if (get_new_object_ctor_call(expr, call))
       return true;
 
     new_expr = call;
@@ -6272,7 +6383,7 @@ bool solidity_convertert::get_function_call(
   return false;
 }
 
-bool solidity_convertert::get_constructor_call(
+bool solidity_convertert::get_new_object_ctor_call(
   const nlohmann::json &ast_node,
   exprt &new_expr)
 {
@@ -6312,7 +6423,7 @@ bool solidity_convertert::get_constructor_call(
   return false;
 }
 
-bool solidity_convertert::get_constructor_call(
+bool solidity_convertert::get_new_object_ctor_call(
   const std::string &contract_name,
   const std::string &ctor_id,
   exprt &new_expr)
@@ -6345,7 +6456,7 @@ bool solidity_convertert::get_implicit_ctor_ref(
   if (context.find_symbol(id) == nullptr)
     return true;
 
-  if (get_constructor_call(contract_name, id, new_expr))
+  if (get_new_object_ctor_call(contract_name, id, new_expr))
     return true;
 
   return false;
@@ -6584,142 +6695,140 @@ bool solidity_convertert::multi_transaction_verification(
     return true;
   }
 
-  for (auto it = id_list.rbegin(); it != id_list.rend(); ++it)
+  // 1.1 get contract symbol ("tag-contractName")
+  auto it = id_list.begin();
+  std::string c_name = exportedSymbolsList[*it];
+  const std::string id = prefix + c_name;
+  if (context.find_symbol(id) == nullptr)
+    return true;
+  const symbolt &contract = *context.find_symbol(id);
+  assert(contract.type.is_struct() && "A contract should be a struct");
+
+  // 1.2 construct a constructor function call and move to func_body
+  // e.g. Base x = new Base();
+
+  std::string ctor_ins_name = "__ESBMC_tmp";
+  std::string ctor_ins_id = "sol:@C@" + c_name + "@" + ctor_ins_name + "#";
+  locationt ctor_ins_loc;
+  std::string ctor_ins_debug_modulename = current_fileName;
+  typet ctor_Ins_typet = symbol_typet(prefix + c_name);
+
+  symbolt ctor_ins_symbol;
+  get_default_symbol(
+    ctor_ins_symbol,
+    ctor_ins_debug_modulename,
+    ctor_Ins_typet,
+    ctor_ins_name,
+    ctor_ins_id,
+    ctor_ins_loc);
+  ctor_ins_symbol.lvalue = true;
+  ctor_ins_symbol.lvalue = true;
+  ctor_ins_symbol.is_extern = false;
+
+  symbolt &added_ctor_symbol = *move_symbol_to_context(ctor_ins_symbol);
+
+  // get value
+  std::string ctor_id;
+  if (get_ctor_call_id(c_name, ctor_id))
+    return true;
+
+  exprt ctor;
+  if (get_new_object_ctor_call(c_name, ctor_id, ctor))
+    return true;
+
+  code_declt decl(symbol_expr(added_ctor_symbol));
+  added_ctor_symbol.value = ctor;
+  decl.operands().push_back(ctor);
+
+  // move to "sol_main" body
+  func_body.move_to_operands(decl);
+
+  // 2. construct a while-loop and move to func_body
+
+  // 2.0 check visibility setting
+  bool skip_vis =
+    config.options.get_option("no-visibility").empty() ? false : true;
+  if (skip_vis)
   {
-    // 1.1 get contract symbol ("tag-contractName")
-    std::string c_name = exportedSymbolsList[*it];
-    const std::string id = prefix + c_name;
-    if (context.find_symbol(id) == nullptr)
-      return true;
-    const symbolt &contract = *context.find_symbol(id);
-    assert(contract.type.is_struct() && "A contract should be a struct");
+    log_warning(
+      "force to verify every function, even it's an unreachable "
+      "internal/private function. This might lead to false positives.");
+  }
 
-    // 1.2 construct a constructor function call and move to func_body
-    // e.g. Base x = new Base();
+  // 2.1 construct ifthenelse statement
+  const struct_typet::componentst &methods =
+    to_struct_type(contract.type).methods();
+  bool is_tgt_cnt = c_name == contractName ? true : false;
 
-    std::string ctor_ins_name = "__ESBMC_tmp";
-    std::string ctor_ins_id = "sol:@C@" + c_name + "@" + ctor_ins_name + "#";
-    locationt ctor_ins_loc;
-    std::string ctor_ins_debug_modulename = current_fileName;
-    typet ctor_Ins_typet = symbol_typet(prefix + c_name);
-
-    symbolt ctor_ins_symbol;
-    get_default_symbol(
-      ctor_ins_symbol,
-      ctor_ins_debug_modulename,
-      ctor_Ins_typet,
-      ctor_ins_name,
-      ctor_ins_id,
-      ctor_ins_loc);
-    ctor_ins_symbol.lvalue = true;
-    ctor_ins_symbol.lvalue = true;
-    ctor_ins_symbol.is_extern = false;
-
-    symbolt &added_ctor_symbol = *move_symbol_to_context(ctor_ins_symbol);
-
-    // get value
-    std::string ctor_id;
-    if (get_ctor_call_id(c_name, ctor_id))
-      return true;
-
-    exprt ctor;
-    if (get_constructor_call(c_name, ctor_id, ctor))
-      return true;
-
-    code_declt decl(symbol_expr(added_ctor_symbol));
-    added_ctor_symbol.value = ctor;
-    decl.operands().push_back(ctor);
-
-    // move to "sol_main" body
-    func_body.move_to_operands(decl);
-
-    // 2. construct a while-loop and move to func_body
-
-    // 2.0 check visibility setting
-    bool skip_vis =
-      config.options.get_option("no-visibility").empty() ? false : true;
-    if (skip_vis)
+  for (const auto &method : methods)
+  {
+    // we only handle public (and external) function
+    // as the private and internal function cannot be directly called
+    if (is_tgt_cnt)
     {
-      log_warning(
-        "force to verify every function, even it's an unreachable "
-        "internal/private function. This might lead to false positives.");
-    }
-
-    // 2.1 construct ifthenelse statement
-    const struct_typet::componentst &methods =
-      to_struct_type(contract.type).methods();
-    bool is_tgt_cnt = c_name == contractName ? true : false;
-
-    for (const auto &method : methods)
-    {
-      // we only handle public (and external) function
-      // as the private and internal function cannot be directly called
-      if (is_tgt_cnt)
-      {
-        if (
-          !skip_vis && method.get_access().as_string() != "public" &&
-          method.get_access().as_string() != "external")
-          continue;
-      }
-      else
-      {
-        // this means functions inherited from base contracts
-        if (!skip_vis && method.get_access().as_string() != "public")
-          continue;
-      }
-
-      // skip constructor
-      const std::string func_id = method.identifier().as_string();
-      if (func_id == ctor_id)
+      if (
+        !skip_vis && method.get_access().as_string() != "public" &&
+        method.get_access().as_string() != "external")
         continue;
-
-      // guard: nondet_bool()
-      if (context.find_symbol("c:@F@nondet_bool") == nullptr)
-        return true;
-      const symbolt &guard = *context.find_symbol("c:@F@nondet_bool");
-
-      side_effect_expr_function_callt guard_expr;
-      get_library_function_call(
-        "nondet_bool",
-        "c:@F@nondet_bool",
-        guard.type,
-        guard.location,
-        guard_expr);
-
-      // then: function_call
-      // get func_decl_ref
-      if (context.find_symbol(func_id) == nullptr)
-        return true;
-      const exprt func = symbol_expr(*context.find_symbol(func_id));
-
-      // get __ESBMC_tmp_ ref
-      const exprt contract_var = symbol_expr(added_ctor_symbol);
-
-      // do member access
-      exprt mem_access =
-        member_exprt(contract_var, func.identifier(), func.type());
-
-      side_effect_expr_function_callt then_expr;
-      if (get_function_call(
-            mem_access,
-            to_code_type(func.type()).return_type(),
-            empty_json,
-            empty_json,
-            then_expr))
-        return true;
-
-      // set &__ESBMC_tmp as the first argument
-      // which overwrite the this pointer
-      then_expr.arguments().at(0) = contract_var;
-      convert_expression_to_code(then_expr);
-
-      // ifthenelse-statement:
-      codet if_expr("ifthenelse");
-      if_expr.copy_to_operands(guard_expr, then_expr);
-
-      // move to while-loop body
-      while_body.move_to_operands(if_expr);
     }
+    else
+    {
+      // this means functions inherited from base contracts
+      if (!skip_vis && method.get_access().as_string() != "public")
+        continue;
+    }
+
+    // skip constructor
+    const std::string func_id = method.identifier().as_string();
+    if (func_id == ctor_id)
+      continue;
+
+    // guard: nondet_bool()
+    if (context.find_symbol("c:@F@nondet_bool") == nullptr)
+      return true;
+    const symbolt &guard = *context.find_symbol("c:@F@nondet_bool");
+
+    side_effect_expr_function_callt guard_expr;
+    get_library_function_call(
+      "nondet_bool",
+      "c:@F@nondet_bool",
+      guard.type,
+      guard.location,
+      guard_expr);
+
+    // then: function_call
+    // get func_decl_ref
+    if (context.find_symbol(func_id) == nullptr)
+      return true;
+    const exprt func = symbol_expr(*context.find_symbol(func_id));
+
+    // get __ESBMC_tmp_ ref
+    const exprt contract_var = symbol_expr(added_ctor_symbol);
+
+    // do member access
+    exprt mem_access =
+      member_exprt(contract_var, func.identifier(), func.type());
+
+    side_effect_expr_function_callt then_expr;
+    if (get_function_call(
+          mem_access,
+          to_code_type(func.type()).return_type(),
+          empty_json,
+          empty_json,
+          then_expr))
+      return true;
+
+    // set &__ESBMC_tmp as the first argument
+    // which overwrite the this pointer
+    then_expr.arguments().at(0) = contract_var;
+    convert_expression_to_code(then_expr);
+
+    // ifthenelse-statement:
+    codet if_expr("ifthenelse");
+    if_expr.copy_to_operands(guard_expr, then_expr);
+
+    // move to while-loop body
+    while_body.move_to_operands(if_expr);
   }
 
   // while-cond:
@@ -6748,17 +6857,17 @@ bool solidity_convertert::multi_transaction_verification(
   main_type.return_type() = e_type;
   const std::string sol_name = "sol_main_" + contractName;
   const std::string sol_id = "sol:@C@" + contractName + "@F@" + sol_name;
-  const symbolt &contract = *context.find_symbol(prefix + contractName);
-  new_symbol.location = contract.location;
+  const symbolt &_contract = *context.find_symbol(prefix + contractName);
+  new_symbol.location = _contract.location;
   std::string debug_modulename =
-    get_modulename_from_path(contract.location.file().as_string());
+    get_modulename_from_path(_contract.location.file().as_string());
   get_default_symbol(
     new_symbol,
     debug_modulename,
     main_type,
     sol_name,
     sol_id,
-    contract.location);
+    _contract.location);
 
   new_symbol.lvalue = true;
   new_symbol.is_extern = false;

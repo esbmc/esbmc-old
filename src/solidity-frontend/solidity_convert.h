@@ -130,8 +130,9 @@ protected:
     const nlohmann::json &decl_ref,
     const nlohmann::json &epxr,
     side_effect_expr_function_callt &call);
-  bool get_constructor_call(const nlohmann::json &ast_node, exprt &new_expr);
-  bool get_constructor_call(
+  bool
+  get_new_object_ctor_call(const nlohmann::json &ast_node, exprt &new_expr);
+  bool get_new_object_ctor_call(
     const std::string &contract_name,
     const std::string &ctor_id,
     exprt &new_expr);
@@ -262,6 +263,7 @@ protected:
   unsigned int current_scope_var_num;
   const nlohmann::json *current_functionDecl;
   const nlohmann::json *current_forStmt;
+  const nlohmann::json *current_blockDecl;
   // Use current level of BinOp type as the "anchor" type for numerical literal conversion:
   // In order to remove the unnecessary implicit IntegralCast. We need type of current level of BinaryOperator.
   // All numeric literals will be implicitly converted to this type. Pop it when finishing the current level of BinaryOperator.
@@ -283,6 +285,9 @@ protected:
   std::unordered_map<int, std::string> scope_map;
   // Store state variables
   std::unordered_set<symbolt *> initializers;
+  // For inheritance
+  nlohmann::json ctor_modifier;
+  nlohmann::json base_contracts;
 
   static constexpr const char *mode = "C++";
 
