@@ -1,7 +1,8 @@
 /*
   The template/library for Solidity built-in variables, function and data structure
 */
-
+#ifndef SOLIDITY_H
+#define SOLIDITY_H
 
 /// header & typedef
 extern const char *sol_header;
@@ -26,5 +27,5 @@ extern const char *sol_mapping;
 /// external library
 extern const char *sol_itoa;
 
-
+#endif // SOLIDITY_H
 
