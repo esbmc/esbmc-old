@@ -70,6 +70,7 @@ protected:
   bool move_initializer_to_ctor(
     const std::string contract_name,
     std::string ctor_id = "");
+  bool move_inheritance_to_struct(const std::string contract_name);
 
   bool
   get_struct_class_fields(const nlohmann::json &ast_node, struct_typet &type);

@@ -191,6 +191,12 @@ bool solidity_convertert::convert()
       if (move_initializer_to_ctor(current_contractName))
         return true;
 
+      // handling inheritance
+      // we do this in the end as some auxiliary variables
+      // may be added during the parsing. e.g. tuple
+      // if (move_inheritance_to_struct(current_contractName))
+      //   return true;
+
       // handling mapping_init
       if (move_mapping_to_ctor())
         return true;
@@ -883,6 +889,12 @@ bool solidity_convertert::get_struct_class_method(
   if (get_access_from_decl(ast_node, comp))
     return true;
 
+  // set virtual / override
+  if (ast_node["virtual"] == true)
+    comp.set("#is_sol_virtual", true);
+  else if (ast_node.contains("overrides"))
+    comp.set("#is_sol_override", true);
+
   type.methods().push_back(comp);
   return false;
 }
@@ -1216,13 +1228,19 @@ bool solidity_convertert::move_initializer_to_ctor(
             }
           }
         }
-        side_effect_expr_function_callt c_call;
-        if (get_function_call(
-              c_ctor, c_type, empty_json, c_param_list_node, c_call))
-          return true;
 
         // get this pointer
         exprt c_this_expr = symbol_expr(*context.find_symbol(this_id));
+
+        //? do member call
+        exprt mem_access =
+          member_exprt(c_this_expr, c_ctor.identifier(), c_ctor.type());
+
+        side_effect_expr_function_callt c_call;
+        if (get_function_call(
+              mem_access, c_type, empty_json, c_param_list_node, c_call))
+          return true;
+
         // typecast
         solidity_gen_typecast(
           ns, c_this_expr, gen_pointer_type(symbol_typet(prefix + c_name)));
@@ -1247,6 +1265,81 @@ bool solidity_convertert::move_initializer_to_ctor(
   return false;
 }
 
+bool solidity_convertert::move_inheritance_to_struct(
+  const std::string contract_name)
+{
+  if (base_contracts == empty_json)
+    return false;
+
+  // current contract symbol
+  auto &c_sym = *context.find_symbol(prefix + contract_name);
+  struct_typet c_t = to_struct_type(c_sym.type);
+
+  for (const auto &node : base_contracts)
+  {
+    std::string name = node["baseName"]["name"].get<std::string>();
+    const auto &sym = *context.find_symbol(prefix + name);
+    struct_typet t = to_struct_type(sym.type);
+
+    for (const auto &comp : t.components())
+    {
+      // first round: handle the state variables
+      // 	- Unlike functions, state variables cannot be overridden by re-declaring it in the child contract.
+      // 	- Shadowing is disallowed in Solidity 0.6
+      // 	- for each state variable in the parent contract, we first check access.
+      // 	- then check if it's already been inserted via name/base_name
+
+      // only public and internal can be inherited
+      if (!(comp.access().as_string() == "public" ||
+            comp.access().as_string() == "internal"))
+        continue;
+
+      // find if it's already popultated
+      bool is_populated = false;
+      for (const auto &c_comp : c_t.components())
+      {
+        if (comp.name() == c_comp.name())
+        {
+          is_populated = true;
+          break;
+        }
+      }
+      if (!is_populated)
+        c_t.components().push_back(comp);
+    }
+
+    for (const auto &meth : t.methods())
+    {
+      // second round: handle the function
+      // 	- Base functions can be overridden by inheriting contracts to change their behavior if they are marked as virtual. The overriding function must then use the override keyword in the function header.
+      // 	- Note that this override is not mandatory
+      // 	- The overriding function may only change the visibility of the overridden function from external to public
+
+      if (!(meth.access().as_string() == "public" ||
+            meth.access().as_string() == "internal"))
+        continue;
+
+      bool is_populated = false;
+      for (const auto &c_meth : c_t.methods())
+      {
+        if (meth.name() == c_meth.name())
+        {
+          is_populated = true;
+          break;
+        }
+      }
+      if (!is_populated)
+        c_t.methods().push_back(meth);
+    }
+  }
+
+  // update
+  c_sym.type = c_t;
+
+  return false;
+}
+
+// for the contract-type variable that does not have initialization
 bool solidity_convertert::get_instantiation_ctor_call(
   const std::string &contract_name,
   exprt &new_expr)
@@ -1368,6 +1461,15 @@ bool solidity_convertert::get_function_definition(
   }
   else
     current_functionName = (*current_functionDecl)["name"].get<std::string>();
+
+  // TODO: handle override: e.g.
+  // contract D is B, C {
+  // // D.foo() returns "C"
+  // // since C is the right most parent contract with function foo()
+  //     function foo() public pure override(B, C) returns (string memory) {
+  //         return super.foo();
+  //     }
+  // }
 
   // 4. Return type
   code_typet type;
