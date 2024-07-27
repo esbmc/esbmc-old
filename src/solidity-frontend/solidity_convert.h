@@ -61,6 +61,12 @@ protected:
   bool get_error_definition(const nlohmann::json &ast_node);
   void add_empty_body_node(nlohmann::json &ast_node);
 
+  // handle inheritance
+  void merge_inheritance_ast(
+    nlohmann::json &c_node,
+    const std::string &c_name,
+    std::set<std::string> &merged_list);
+
   // handle the constructor
   bool add_implicit_constructor(const std::string &contract_name);
   bool get_implicit_ctor_ref(exprt &new_expr, const std::string &contract_name);
@@ -70,7 +76,10 @@ protected:
   bool move_initializer_to_ctor(
     const std::string contract_name,
     std::string ctor_id = "");
-  bool move_inheritance_to_struct(const std::string contract_name);
+  bool move_inheritance_to_ctor(
+    const std::string contract_name,
+    std::string ctor_id,
+    symbolt &sym);
 
   bool
   get_struct_class_fields(const nlohmann::json &ast_node, struct_typet &type);
@@ -136,6 +145,7 @@ protected:
   bool get_new_object_ctor_call(
     const std::string &contract_name,
     const std::string &ctor_id,
+    const nlohmann::json param_list,
     exprt &new_expr);
   bool get_current_contract_name(
     const nlohmann::json &ast_node,
@@ -289,6 +299,7 @@ protected:
   // For inheritance
   nlohmann::json ctor_modifier;
   nlohmann::json base_contracts;
+  bool is_contract_member_access;
 
   static constexpr const char *mode = "C++";
 
