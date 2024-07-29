@@ -1,4 +1,4 @@
 CORE
 contract.solast
 --contract Dreive --sol contract.sol --k-induction
-^VERIFICATION SUCCESSFUL$
+^VERIFICATION FAILED$

@@ -173,7 +173,15 @@ bool solidity_convertert::convert()
       std::set<std::string> dump = {};
       merge_inheritance_ast(c_node, current_contractName, dump);
 
-      nlohmann::json &ast_nodes = c_node["nodes"];
+      nlohmann::json &ast_nodes = (*itr)["nodes"];
+      for (nlohmann::json::iterator ittr = ast_nodes.begin();
+           ittr != ast_nodes.end();
+           ++ittr)
+      {
+        if (get_noncontract_defition(*ittr))
+          return true;
+      }
+      ast_nodes = c_node["nodes"];
       for (nlohmann::json::iterator ittr = ast_nodes.begin();
            ittr != ast_nodes.end();
            ++ittr)
@@ -621,6 +629,8 @@ bool solidity_convertert::get_var_decl(
   bool is_state_var = ast_node["stateVariable"].get<bool>();
   t.set("#sol_state_var", is_state_var);
 
+  bool is_inherited = ast_node.contains("is_inherited");
+
   // 2. populate id and name
   std::string name, id;
 
@@ -666,7 +676,7 @@ bool solidity_convertert::get_var_decl(
   // For local var decl, we look for "initialValue"
   bool has_init =
     (ast_node.contains("value") || ast_node.contains("initialValue"));
-  if (!has_init)
+  if (!has_init || is_inherited)
   {
     // for both state and non-state variables, set default value as zero
     symbol.value = gen_zero(get_complete_type(t, ns), true);
@@ -681,7 +691,7 @@ bool solidity_convertert::get_var_decl(
   code_declt decl(symbol_expr(added_symbol));
 
   exprt val;
-  if (has_init)
+  if (has_init && !is_inherited)
   {
     nlohmann::json init_value =
       ast_node.contains("value") ? ast_node["value"] : ast_node["initialValue"];
@@ -692,7 +702,7 @@ bool solidity_convertert::get_var_decl(
     if (get_expr(init_value, literal_type, val))
       return true;
 
-    solidity_gen_typecast(ns, val, t);
+    convert_type_expr(ns, val, t);
 
     added_symbol.value = val;
     decl.operands().push_back(val);
@@ -735,7 +745,7 @@ bool solidity_convertert::get_var_decl(
   // store state variable, which will be initialized in the constructor
   // note that for the state variables that do not have initializer
   // we have already set it as zero value
-  if (is_state_var && !ast_node.contains("is_inherited"))
+  if (is_state_var && !is_inherited)
     initializers.insert(&added_symbol);
 
   decl.location() = location_begin;
@@ -1009,8 +1019,9 @@ void solidity_convertert::add_enum_member_val(nlohmann::json &ast_node)
   for (nlohmann::json::iterator itr = members.begin(); itr != members.end();
        ++itr, ++idx)
   {
-    (*itr).push_back(
-      nlohmann::json::object_t::value_type("Value", std::to_string(idx)));
+    if (!(*itr).contains("Value"))
+      (*itr).push_back(
+        nlohmann::json::object_t::value_type("Value", std::to_string(idx)));
   }
 }
 
@@ -1031,6 +1042,12 @@ bool solidity_convertert::get_error_definition(const nlohmann::json &ast_node)
   name = ast_node["name"].get<std::string>();
   id = "sol:@" + name + "#" + std::to_string(id_num);
 
+  if (context.find_symbol(id) != nullptr)
+  {
+    current_functionDecl = old_functionDecl;
+    current_functionName = old_functionName;
+    return false;
+  }
   // update scope map
   scope_map.insert(std::pair<int, std::string>(id_num, name));
 
@@ -1208,19 +1225,6 @@ void solidity_convertert::merge_inheritance_ast(
           //   i["name"] = i_name;
           // }
 
-          // remove the initial value of state variable
-          if (
-            i.contains("nodeType") &&
-            i["nodeType"].get<std::string>() == "VariableDeclaration" &&
-            i["stateVariable"] == true)
-          {
-            // clear value
-            if (i.contains("value"))
-              i.erase("value");
-            else if (i.contains("initialValue"))
-              i.erase("initialValue");
-          }
-
           // Here we have ruled out the special cases
           // so that we could merge the AST
           i.push_back({"is_inherited", true});
@@ -1286,6 +1290,7 @@ bool solidity_convertert::move_initializer_to_ctor(
     exprt lhs = member_exprt(base, comp.name(), comp.type());
     exprt rhs = i->value;
     exprt _assign = side_effect_exprt("assign", comp.type());
+    _assign.location() = sym.location;
 
     convert_type_expr(ns, rhs, comp.type());
     _assign.copy_to_operands(lhs, rhs);
@@ -1626,6 +1631,13 @@ bool solidity_convertert::get_function_definition(
   // 7. Populate "std::string id, name"
   std::string name, id;
   get_function_definition_name(ast_node, name, id);
+
+  if (context.find_symbol(id) != nullptr)
+  {
+    current_functionDecl = old_functionDecl;
+    current_functionName = old_functionName;
+    return false;
+  }
 
   if (name == "func_dynamic")
     printf("@@ found func_dynamic\n");
@@ -2496,6 +2508,7 @@ bool solidity_convertert::get_expr(
   {
     // "nodeType": "TupleExpression":
     //    1. InitList: uint[3] x = [1, 2, 3];
+    //                         x = [1];  x = [1,2];
     //    2. Operator:
     //        - (x+1) % 2
     //        - if( x && (y || z) )
@@ -2536,6 +2549,7 @@ bool solidity_convertert::get_expr(
       // declare static array tuple
       exprt inits;
       inits = gen_zero(arr_type);
+      inits.type().set("#sol_type", "TUPLE_ARRAY");
 
       // populate array
       int i = 0;
@@ -3485,9 +3499,9 @@ bool solidity_convertert::get_binary_operator_expr(
   {
   case SolidityGrammar::ExpressionT::BO_Assign:
   {
-    // special handling for tuple-type assignment;
     typet lt = lhs.type();
     typet rt = rhs.type();
+    // special handling for tuple-type assignment;
     if (lt.get("#sol_type") == "TUPLE_INSTANCE")
     {
       code_blockt _block;
@@ -6799,6 +6813,26 @@ void solidity_convertert::convert_type_expr(
 
       src_expr = bswap_expr;
     }
+    else if (src_expr.type().get("#sol_type") == "TUPLE_ARRAY")
+    {
+      // e.g. uint[3] x = [1] ==> uint[3] x == [1,0,0]
+      assert(src_expr.type().id() == typet::t_array);
+      assert(dest_type.id() == typet::t_array);
+
+      int d_size = stoi(to_array_type(dest_type).size().cformat().as_string());
+      int s_size = src_expr.operands().size();
+      exprt _zero = gen_zero(
+        get_complete_type(to_array_type(dest_type).subtype(), ns), true);
+      _zero.location() = src_expr.location();
+      _zero.set("#cformat", 0);
+
+      // push zero
+      for (int i = s_size; i < d_size; i++)
+        src_expr.operands().push_back(_zero);
+
+      // reset size
+      to_array_type(src_expr.type()).size() = to_array_type(dest_type).size();
+    }
     else
       solidity_gen_typecast(ns, src_expr, dest_type);
   }
@@ -6809,16 +6843,14 @@ static inline void static_lifetime_init(const contextt &context, codet &dest)
   dest = code_blockt();
 
   // call designated "initialization" functions
-  context.foreach_operand_in_order(
-    [&dest](const symbolt &s)
+  context.foreach_operand_in_order([&dest](const symbolt &s) {
+    if (s.type.initialization() && s.type.is_code())
     {
-      if (s.type.initialization() && s.type.is_code())
-      {
-        code_function_callt function_call;
-        function_call.function() = symbol_expr(s);
-        dest.move_to_operands(function_call);
-      }
-    });
+      code_function_callt function_call;
+      function_call.function() = symbol_expr(s);
+      dest.move_to_operands(function_call);
+    }
+  });
 }
 
 // declare an empty array symbol and move it to the context
