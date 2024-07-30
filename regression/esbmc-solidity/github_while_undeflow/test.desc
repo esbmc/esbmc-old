@@ -1,5 +1,5 @@
 CORE
 contract.solast
---function while_underflow --sol contract.sol
-.*line 8 function while_underflow
+--k-induction --sol contract.sol
+.*function while_underflow
 ^VERIFICATION FAILED$

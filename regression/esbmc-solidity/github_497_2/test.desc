@@ -1,5 +1,5 @@
-CORE
+FUTURE
 MyContract_overflow_nested.solast
---function func_overflow --sol MyContract_overflow_nested.sol
+--sol MyContract_overflow_nested.sol
 .*line 16 function func_overflow$
 ^VERIFICATION FAILED$

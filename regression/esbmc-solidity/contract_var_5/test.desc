@@ -1,4 +1,4 @@
-CORE
+FUTURE
 contract.solast
 --sol contract.sol --k-induction --contract Base
 ^VERIFICATION FAILED$

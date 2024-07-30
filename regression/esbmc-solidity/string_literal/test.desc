@@ -1,4 +1,4 @@
 CORE
 contract.solast
---function test --sol constract.sol
+--k-induction --sol constract.sol
 ^VERIFICATION SUCCESSFUL$

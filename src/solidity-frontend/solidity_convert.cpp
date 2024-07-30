@@ -621,6 +621,19 @@ bool solidity_convertert::get_var_decl(
       return true;
   }
 
+  if (
+    t.get("#sol_type") == "CONTRACT" &&
+    t.identifier().as_string() == prefix + current_contractName)
+  {
+    // contract Base{
+    //   Base x;
+    // }
+    // which is not allowed in C++
+    // thus we have to log_error in this case
+    log_error("Unspported contract variable declaration.");
+    abort();
+  }
+
   // set const qualifier
   if (ast_node.contains("mutability") && ast_node["mutability"] == "constant")
     t.cmt_constant(true);
@@ -656,6 +669,9 @@ bool solidity_convertert::get_var_decl(
     return true;
   }
 
+  if (context.find_symbol(id) != nullptr)
+    return false;
+
   // 3. populate location
   locationt location_begin;
   get_location_from_decl(ast_node, location_begin);
@@ -678,7 +694,13 @@ bool solidity_convertert::get_var_decl(
   // For local var decl, we look for "initialValue"
   bool has_init =
     (ast_node.contains("value") || ast_node.contains("initialValue"));
-  if (!has_init || is_inherited)
+  bool is_not_init_contract_var =
+    (SolidityGrammar::get_type_name_t(
+       ast_node["typeName"]["typeDescriptions"]) ==
+     SolidityGrammar::ContractTypeName) &&
+    !has_init;
+
+  if ((!has_init || is_inherited) && !is_not_init_contract_var)
   {
     // for both state and non-state variables, set default value as zero
     symbol.value = gen_zero(get_complete_type(t, ns), true);
@@ -709,11 +731,9 @@ bool solidity_convertert::get_var_decl(
     added_symbol.value = val;
     decl.operands().push_back(val);
   }
-  else if (
-    SolidityGrammar::get_type_name_t(
-      ast_node["typeName"]["typeDescriptions"]) ==
-    SolidityGrammar::ContractTypeName)
+  else if (is_not_init_contract_var)
   {
+    log_debug("solidity", "Handling uninitialized contract type variable");
     /*
       Special handling for contract-type variable instantiation
       e.g.  Base x ==> Base x = Base();
@@ -1156,6 +1176,19 @@ void solidity_convertert::merge_inheritance_ast(
       {
         for (auto i : i_node["nodes"])
         {
+          // skip duplicate
+          bool is_dubplicate = false;
+          for (const auto &c_i : c_node["nodes"])
+          {
+            if (c_i.contains("id") && c_i["id"] == i["id"])
+            {
+              is_dubplicate = true;
+              break;
+            }
+          }
+          if (is_dubplicate)
+            continue;
+
           // external & private function/state variable cannot be inherited
           // however, we need to simulate cases like public functions accessing
           // private members. thus we just inherited it and avoid setting them as the
@@ -1202,30 +1235,6 @@ void solidity_convertert::merge_inheritance_ast(
             if (is_conflict)
               continue;
           }
-
-          // for ctor
-          // 1. assign name
-          // 2. rule out ctor function shadowing
-          // if (
-          //   i.contains("kind") && i["kind"] == "constructor" && i["name"] == "")
-          // {
-          //   for (auto &c_i : c_node["node"])
-          //   {
-          //     if (
-          //       c_i.contains("nodeType") &&
-          //       c_i["nodeType"] == "FunctionDefinition" &&
-          //       c_i["kind"] != "constructor" && i["name"] == c_i["name"])
-          //     {
-          //       // this means there is a normal function has the same name as the
-          //       // parent nodes' ctor name
-          //       // although it is allowed in grammar but this is definitely not a good practice
-          //       // therefore we log_error and abort
-          //       log_error("function shadowing the parent node's constructor.");
-          //       abort();
-          //     }
-          //   }
-          //   i["name"] = i_name;
-          // }
 
           // Here we have ruled out the special cases
           // so that we could merge the AST
@@ -4281,6 +4290,12 @@ bool solidity_convertert::get_esbmc_builtin_ref(
   new_expr.cmt_lvalue(true);
   new_expr.name(name);
 
+  locationt loc;
+  get_location_from_decl(decl, loc);
+  new_expr.location() = loc;
+  if (current_functionDecl)
+    new_expr.location().function(current_functionName);
+
   return false;
 }
 
@@ -6490,7 +6505,8 @@ bool solidity_convertert::get_function_call(
   call.function() = func;
   call.type() = t;
   call.location() = func.location();
-  call.location().function(func.name());
+  if (current_functionDecl)
+    call.location().function(current_functionName);
 
   // populate params
   if (decl_ref.empty() && !expr.empty())
@@ -6676,8 +6692,16 @@ bool solidity_convertert::get_new_object_ctor_call(
 
   // setup initializer
   side_effect_expr_function_callt call;
-  if (get_function_call(ctor, type, empty_json, param_list, call))
+  if (get_function_call(ctor, type, empty_json, empty_json, call))
     return true;
+  if (param_list != empty_json)
+  {
+    // two round funciton call:
+    // first round: add this pointer dereference
+    // second round: add params
+    if (get_function_call(ctor, type, empty_json, param_list, call))
+      return true;
+  }
   call.function().set("constructor", 1);
 
   // construct temporary object
