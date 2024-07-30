@@ -28,7 +28,9 @@ solidity_convertert::solidity_convertert(
     current_scope_var_num(1),
     current_functionDecl(nullptr),
     current_forStmt(nullptr),
-    current_blockDecl(nullptr),
+    current_blockDecl(code_blockt()),
+    current_lhsDecl(false),
+    current_rhsDecl(false),
     current_functionName(""),
     current_contractName(""),
     scope_map({}),
@@ -216,7 +218,7 @@ bool solidity_convertert::convert()
     current_functionName = "";
     current_functionDecl = nullptr;
     current_forStmt = nullptr;
-    current_blockDecl = nullptr;
+    current_blockDecl.clear();
     global_scope_id = 0;
     map_init_block.clear();
     initializers.clear();
@@ -1441,7 +1443,10 @@ bool solidity_convertert::move_inheritance_to_ctor(
               rhs = member_exprt(
                 symbol_expr(added_ctor_symbol), c_comp.name(), c_comp.type());
               _assign = side_effect_exprt("assign", comp.type());
+
+              convert_type_expr(ns, rhs, comp.type());
               _assign.copy_to_operands(lhs, rhs);
+
               convert_expression_to_code(_assign);
               // insert after the object declaration
               sym.value.operands().insert(
@@ -1799,6 +1804,17 @@ bool solidity_convertert::get_block(
 
       convert_expression_to_code(statement);
       _block.operands().push_back(statement);
+
+      if (!current_blockDecl.operands().empty())
+      {
+        for (auto op : current_blockDecl.operands())
+        {
+          convert_expression_to_code(op);
+          _block.operands().push_back(op);
+        }
+        current_blockDecl.clear();
+      }
+
       ++ctr;
     }
     log_debug("solidity", " \t@@@ CompoundStmt has {} statements", ctr);
@@ -1942,8 +1958,6 @@ bool solidity_convertert::get_statement(
         return true;
       }
 
-      code_blockt _block;
-
       // get tuple instance
       std::string tname, tid;
       if (get_tuple_instance_name(*current_functionDecl, tname, tid))
@@ -1983,7 +1997,7 @@ bool solidity_convertert::get_statement(
           exprt rop = rhs.operands().at(i);
 
           // do assignment
-          get_tuple_assignment(_block, lop, rop);
+          get_tuple_assignment(current_blockDecl, lop, rop);
         }
       }
       else
@@ -2003,7 +2017,7 @@ bool solidity_convertert::get_statement(
               stmt["expression"]["typeDescriptions"],
               func_call))
           return true;
-        get_tuple_function_call(_block, func_call);
+        get_tuple_function_call(current_blockDecl, func_call);
 
         size_t ls = to_struct_type(lhs.type()).components().size();
         size_t rs = to_struct_type(rhs.type()).components().size();
@@ -2028,17 +2042,14 @@ bool solidity_convertert::get_statement(
             return true;
 
           // do assignment
-          get_tuple_assignment(_block, lop, rop);
+          get_tuple_assignment(current_blockDecl, lop, rop);
         }
       }
       // do return in the end
       exprt return_expr = code_returnt();
-      _block.move_to_operands(return_expr);
+      current_blockDecl.move_to_operands(return_expr);
 
-      if (_block.operands().size() == 0)
-        new_expr = code_skipt();
-      else
-        new_expr = _block;
+      new_expr = code_skipt();
       break;
     }
 
@@ -2514,7 +2525,8 @@ bool solidity_convertert::get_expr(
     //        - if( x && (y || z) )
     //    3. TupleExpr:
     //        - multiple returns: return (x, y);
-    //        - (x, y) = (y, x)
+    //        - swap: (x, y) = (y, x)
+    //        - constant: (1, 2)
 
     assert(expr.contains("components"));
     SolidityGrammar::TypeNameT type =
@@ -2549,7 +2561,7 @@ bool solidity_convertert::get_expr(
       // declare static array tuple
       exprt inits;
       inits = gen_zero(arr_type);
-      inits.type().set("#sol_type", "TUPLE_ARRAY");
+      inits.type().set("#sol_type", "ARRAY");
 
       // populate array
       int i = 0;
@@ -2603,7 +2615,6 @@ bool solidity_convertert::get_expr(
           tuple.x = 1;
           tuple.y = 2;
         }
-        ? any potential scope issue?
 
       case 2:
         1. when parsing the funciton definition, if the returnParam > 1
@@ -2632,13 +2643,34 @@ bool solidity_convertert::get_expr(
         }
       */
 
-      // 1. construct struct type
-      if (get_tuple_definition(expr))
-        return true;
+      if (current_lhsDecl)
+      {
+        // avoid nested
+        assert(!current_rhsDecl);
 
-      //2. construct struct_type instance
-      if (get_tuple_instance(expr, new_expr))
-        return true;
+        // we do not create struct-tuple instance for lhs
+        code_blockt _block;
+        exprt op;
+        for (auto i : expr["components"])
+        {
+          if (get_expr(i, op))
+            return true;
+          if (op.is_nil())
+            continue;
+          _block.operands().push_back(op);
+        }
+        new_expr = _block;
+      }
+      else
+      {
+        // 1. construct struct type
+        if (get_tuple_definition(expr))
+          return true;
+
+        //2. construct struct_type instance
+        if (get_tuple_instance(expr, new_expr))
+          return true;
+      }
 
       break;
     }
@@ -3332,22 +3364,30 @@ bool solidity_convertert::get_binary_operator_expr(
   {
     nlohmann::json literalType = expr["leftHandSide"]["typeDescriptions"];
 
+    current_lhsDecl = true;
     if (get_expr(expr["leftHandSide"], lhs))
       return true;
+    current_lhsDecl = false;
 
+    current_rhsDecl = true;
     if (get_expr(expr["rightHandSide"], literalType, rhs))
       return true;
+    current_rhsDecl = false;
   }
   else if (expr.contains("leftExpression"))
   {
     nlohmann::json literalType_l = expr["leftExpression"]["typeDescriptions"];
     nlohmann::json literalType_r = expr["rightExpression"]["typeDescriptions"];
 
+    current_lhsDecl = true;
     if (get_expr(expr["leftExpression"], literalType_l, lhs))
       return true;
+    current_lhsDecl = false;
 
+    current_rhsDecl = true;
     if (get_expr(expr["rightExpression"], literalType_r, rhs))
       return true;
+    current_rhsDecl = false;
   }
   else
     assert(!"should not be here - unrecognized LHS and RHS keywords in expression JSON");
@@ -3501,132 +3541,65 @@ bool solidity_convertert::get_binary_operator_expr(
   {
     typet lt = lhs.type();
     typet rt = rhs.type();
+
     // special handling for tuple-type assignment;
-    if (lt.get("#sol_type") == "TUPLE_INSTANCE")
+    //TODO: handle nested tuple
+    if (
+      rt.get("#sol_type") == "TUPLE_INSTANCE" || rt.get("#sol_type") == "TUPLE")
     {
-      code_blockt _block;
-      if (rt.get("#sol_type") == "TUPLE_INSTANCE")
-      {
-        // e.g. (x,y) = (1,2); (x,y) = (func(),x);
-        // =>
-        //  t.mem0 = 1; #1
-        //  t.mem1 = 2; #2
-        //  x = t.mem0; #3
-        //  y = t.mem1; #4
+      log_debug("solidity", "Handling tuple assignment.");
 
-        size_t i = 0;
-        size_t j = 0;
-        size_t ls = to_struct_type(lhs.type()).components().size();
-        size_t rs = to_struct_type(rhs.type()).components().size();
-        assert(ls <= rs);
-
-        // do #1 #2
-        while (i < rs)
-        {
-          exprt lop;
-          if (get_tuple_member_call(
-                rhs.identifier(),
-                to_struct_type(rhs.type()).components().at(i),
-                lop))
-            return true;
-
-          exprt rop = rhs.operands().at(i);
-          //do assignment
-          get_tuple_assignment(_block, lop, rop);
-          // update counter
-          ++i;
-        }
-
-        // reset
-        i = 0;
-
-        // do #3 #4
-        while (i < ls && j < rs)
-        {
-          // construct assignemnt
-          exprt lcomp = to_struct_type(lhs.type()).components().at(i);
-          exprt rcomp = to_struct_type(rhs.type()).components().at(j);
-          exprt lop = lhs.operands().at(i);
-          exprt rop;
-
-          if (get_tuple_member_call(
-                rhs.identifier(),
-                to_struct_type(rhs.type()).components().at(j),
-                rop))
-            return true;
-
-          if (lcomp.name() != rcomp.name())
-          {
-            // e.g. (, x) = (1, 2)
-            //        null <=> tuple2.mem0
-            // tuple1.mem1 <=> tuple2.mem1
-            ++j;
-            continue;
-          }
-          //do assignment
-          get_tuple_assignment(_block, lop, rop);
-          // update counter
-          ++i;
-          ++j;
-        }
-      }
-      else if (rt.get("#sol_type") == "TUPLE")
+      assert(lt.is_code() && to_code(lhs).statement() == "block");
+      if (rt.get("#sol_type") == "TUPLE")
       {
         // e.g. (x,y) = func(); (x,y) = func(func2()); (x, (x,y)) = (x, func());
+        // ==>
+        //    func(); // this initializes the tuple instance
+        //    x = tuple.mem0;
+        //    y = tuple.mem1;
         exprt new_rhs;
         if (get_tuple_function_ref(
               expr["rightHandSide"]["expression"], new_rhs))
           return true;
 
         // add function call
-        get_tuple_function_call(_block, rhs);
-
-        size_t ls = to_struct_type(lhs.type()).components().size();
-        size_t rs = to_struct_type(new_rhs.type()).components().size();
-        assert(ls == rs);
-
-        for (size_t i = 0; i < ls; i++)
-        {
-          exprt lop = lhs.operands().at(i);
-
-          exprt rop;
-          if (get_tuple_member_call(
-                new_rhs.identifier(),
-                to_struct_type(new_rhs.type()).components().at(i),
-                rop))
-            return true;
-
-          get_tuple_assignment(_block, lop, rop);
-        }
-      }
-      else
-      {
-        log_error("Unexpected Tuple");
-        abort();
+        get_tuple_function_call(current_blockDecl, rhs);
+        rhs = new_rhs;
       }
 
-      // fix ordering
-      // e.g.
-      // x = 1;
-      // y = 2;
-      // (x , y , x, y) =(y, x , 0, 0);
-      // assert(x == 2); // hold
-      // assert(y == 1); // hold
-      code_blockt ordered_block;
-      std::set<irep_idt> assigned_symbol;
-      for (auto &assign : _block.operands())
+      // e.g. (x,y) = (1,2); (x,y) = (func(),x);
+      // =>
+      //  t.mem0 = 1; #1
+      //  t.mem1 = 2; #2
+      //  x = t.mem0; #3
+      //  y = t.mem1; #4
+      // where #1 and #2 are already in the current_blockdecl
+
+      // do #3 #4
+      std::set<exprt> assigned_symbol;
+      for (size_t i = 0; i < lhs.operands().size(); i++)
       {
-        // assume lhs should always be a symbol type
-        irep_idt id = assign.op0().op0().identifier();
-        if (!id.empty() && assigned_symbol.count(id))
-          // e.g. (x,x) = (1, 2); x==1 hold
+        // e.g. (, x) = (1, 2)
+        //      null <=> tuple2.mem0
+        //         x <=> tuple2.mem1
+        exprt lop = lhs.operands().at(i);
+        if (!lop.is_nil() && assigned_symbol.count(lop))
+          // e.g. (x,x) = (1, 2); assert(x==1) hold
+          // we skip the variable that has been assigned
           continue;
-        assigned_symbol.insert(id);
-        ordered_block.move_to_operands(assign);
+        assigned_symbol.insert(lop);
+
+        exprt rop;
+        if (get_tuple_member_call(
+              rhs.identifier(),
+              to_struct_type(rhs.type()).components().at(i),
+              rop))
+          return true;
+
+        get_tuple_assignment(current_blockDecl, lop, rop);
       }
 
-      new_expr = ordered_block;
-
+      new_expr = code_skipt();
       current_BinOp_type.pop();
       return false;
     }
@@ -4833,6 +4806,7 @@ bool solidity_convertert::get_tuple_definition(const nlohmann::json &ast_node)
   symbolt symbol;
   get_default_symbol(symbol, debug_modulename, t, name, id, location_begin);
   symbol.static_lifetime = true;
+  symbol.file_local = true;
   symbolt &added_symbol = *move_symbol_to_context(symbol);
 
   auto &args = ast_node.contains("components")
@@ -4896,10 +4870,9 @@ bool solidity_convertert::get_tuple_instance(
 
   if (context.find_symbol(id) == nullptr)
     return true;
-  const symbolt &sym = *context.find_symbol(id);
 
   // get type
-  typet t = sym.type;
+  typet t = context.find_symbol(id)->type;
   t.set("#sol_type", "TUPLE_INSTANCE");
   assert(t.id() == typet::id_struct);
 
@@ -4920,32 +4893,32 @@ bool solidity_convertert::get_tuple_instance(
   symbolt symbol;
   get_default_symbol(symbol, debug_modulename, t, name, id, location_begin);
   symbol.static_lifetime = true;
+  symbol.file_local = true;
+
+  symbol.value = gen_zero(get_complete_type(t, ns), true);
+  symbol.value.zero_initializer(true);
   symbolt &added_symbol = *move_symbol_to_context(symbol);
+  new_expr = symbol_expr(added_symbol);
+  new_expr.identifier(id);
 
   if (!ast_node.contains("components"))
   {
     // assume it's function return parameter list
     // therefore no initial value
-    new_expr = symbol_expr(added_symbol);
-
     return false;
   }
 
-  // populate initial value
-  // e.g. (1,2) ==> Tuple tuple = Tuple(1,2);
-  //! since there is no tuple type variable in solidity
-  // we can just convert it as inital value instead of assignment
-  //? should we set the default value as zero?
-
-  exprt inits = gen_zero(t);
+  // do assignment
   auto &args = ast_node["components"];
 
   size_t i = 0;
   size_t j = 0;
-  unsigned is = inits.operands().size();
+  unsigned is = to_struct_type(t).components().size();
   unsigned as = args.size();
   assert(is <= as);
 
+  exprt comp;
+  exprt member_access;
   while (i < is && j < as)
   {
     if (args.at(j).is_null())
@@ -4954,27 +4927,23 @@ bool solidity_convertert::get_tuple_instance(
       continue;
     }
 
+    comp = to_struct_type(t).components().at(i);
+    if (get_tuple_member_call(id, comp, member_access))
+      return true;
+
     exprt init;
     const nlohmann::json &litera_type = args.at(j)["typeDescriptions"];
 
     if (get_expr(args.at(j), litera_type, init))
       return true;
 
-    const struct_union_typet::componentt *c =
-      &to_struct_type(t).components().at(i);
-    typet elem_type = c->type();
-
-    solidity_gen_typecast(ns, init, elem_type);
-    inits.operands().at(i) = init;
+    get_tuple_assignment(current_blockDecl, member_access, init);
 
     // update
     ++i;
     ++j;
   }
 
-  added_symbol.value = inits;
-  new_expr = added_symbol.value;
-  new_expr.identifier(id);
   return false;
 }
 
@@ -5031,7 +5000,7 @@ bool solidity_convertert::get_tuple_function_ref(
   return false;
 }
 
-// Knowing that there is a component x in the struct_tuple A, we construct A.x
+// Knowing that there is a component x in the struct_tuple_instance A, we construct A.x
 bool solidity_convertert::get_tuple_member_call(
   const irep_idt instance_id,
   const exprt &comp,
@@ -5064,6 +5033,8 @@ void solidity_convertert::get_tuple_assignment(
   exprt rop)
 {
   exprt assign_expr = side_effect_exprt("assign", lop.type());
+
+  convert_type_expr(ns, rop, lop.type());
   assign_expr.copy_to_operands(lop, rop);
 
   convert_expression_to_code(assign_expr);
@@ -6784,10 +6755,12 @@ void solidity_convertert::convert_type_expr(
   exprt &src_expr,
   const typet &dest_type)
 {
-  if (src_expr.type() != dest_type)
+  typet src_type = src_expr.type();
+
+  if (src_type != dest_type)
   {
     // only do conversion when the src.type != dest.type
-    if (is_bytes_type(src_expr.type()) && is_bytes_type(dest_type))
+    if (is_bytes_type(src_type) && is_bytes_type(dest_type))
     {
       // 1. Fixed-size Bytes Converted to Smaller Types
       //    bytes2 a = 0x4326;
@@ -6801,7 +6774,7 @@ void solidity_convertert::convert_type_expr(
       exprt bswap_expr, sub_bswap_expr;
 
       // 1. bswap
-      sub_bswap_expr = exprt("bswap", src_expr.type());
+      sub_bswap_expr = exprt("bswap", src_type);
       sub_bswap_expr.operands().push_back(src_expr);
 
       // 2. typecast
@@ -6813,25 +6786,65 @@ void solidity_convertert::convert_type_expr(
 
       src_expr = bswap_expr;
     }
-    else if (src_expr.type().get("#sol_type") == "TUPLE_ARRAY")
+    else if (src_type.get("#sol_type") == "ARRAY")
     {
-      // e.g. uint[3] x = [1] ==> uint[3] x == [1,0,0]
-      assert(src_expr.type().id() == typet::t_array);
-      assert(dest_type.id() == typet::t_array);
+      assert(src_type.id() == typet::t_array);
+      assert(dest_type.is_array());
 
-      int d_size = stoi(to_array_type(dest_type).size().cformat().as_string());
-      int s_size = src_expr.operands().size();
-      exprt _zero = gen_zero(
-        get_complete_type(to_array_type(dest_type).subtype(), ns), true);
-      _zero.location() = src_expr.location();
-      _zero.set("#cformat", 0);
+      if (src_expr.id() == irept::id_member)
+      {
+        // e.g. uint[3] x; (x, y) = ([1,z], ...)
+        // where [1,2] ==> uint8[] ==> tuple_instance.mem0
+        // ==>
+        //  x  = [（uint256)tuple_instance.mem0[0], （uint256)tuple_instance.mem0[1], 0]
 
-      // push zero
-      for (int i = s_size; i < d_size; i++)
-        src_expr.operands().push_back(_zero);
+        array_typet arr_t = to_array_type(dest_type);
+        exprt new_arr = exprt(irept::id_array, arr_t);
+        int old_size =
+          stoi(to_array_type(src_type).size().cformat().as_string());
 
-      // reset size
-      to_array_type(src_expr.type()).size() = to_array_type(dest_type).size();
+        exprt arr_comp;
+        for (int i = 0; i < old_size; i++)
+        {
+          // do array index
+          exprt idx = constant_exprt(
+            integer2binary(i, bv_width(size_type())),
+            integer2string(i),
+            size_type());
+          exprt op = index_exprt(src_expr, idx, src_type.subtype());
+
+          arr_comp = typecast_exprt(op, dest_type.subtype());
+          new_arr.operands().push_back(arr_comp);
+        }
+
+        src_expr = new_arr;
+        src_type = new_arr.type();
+      }
+
+      // allow fall-through
+      if (src_expr.id() == irept::id_array)
+      {
+        // e.g. uint[3] x = [1] ==> uint[3] x == [1,0,0]
+        int d_size =
+          stoi(to_array_type(dest_type).size().cformat().as_string());
+        int s_size = src_expr.operands().size();
+        if (d_size > s_size)
+        {
+          exprt _zero =
+            gen_zero(get_complete_type(src_type.subtype(), ns), true);
+          _zero.location() = src_expr.location();
+          _zero.set("#cformat", 0);
+          // push zero
+          for (int i = s_size; i < d_size; i++)
+            src_expr.operands().push_back(_zero);
+
+          // reset size
+          to_array_type(src_expr.type()).size() =
+            to_array_type(dest_type).size();
+        }
+      }
+
+      solidity_gen_typecast(ns, src_expr, dest_type);
     }
     else
       solidity_gen_typecast(ns, src_expr, dest_type);

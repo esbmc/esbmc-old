@@ -274,7 +274,11 @@ protected:
   unsigned int current_scope_var_num;
   const nlohmann::json *current_functionDecl;
   const nlohmann::json *current_forStmt;
-  const nlohmann::json *current_blockDecl;
+  //TODO: store multiple exprt and flatten the block later
+  code_blockt current_blockDecl;
+  // for tuple
+  bool current_lhsDecl;
+  bool current_rhsDecl;
   // Use current level of BinOp type as the "anchor" type for numerical literal conversion:
   // In order to remove the unnecessary implicit IntegralCast. We need type of current level of BinaryOperator.
   // All numeric literals will be implicitly converted to this type. Pop it when finishing the current level of BinaryOperator.
