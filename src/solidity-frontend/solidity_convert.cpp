@@ -1984,13 +1984,24 @@ bool solidity_convertert::get_statement(
         // tuple.mem0 = x; tuple.mem1 = y; return ;
 
         // get rhs
+        // hack: we need the expression block, not tuple instance
+        current_lhsDecl = true;
         exprt rhs;
         if (get_expr(stmt["expression"], rhs))
           return true;
+        current_lhsDecl = false;
 
         size_t ls = to_struct_type(lhs.type()).components().size();
         size_t rs = rhs.operands().size();
-        assert(ls == rs);
+        if (ls != rs)
+        {
+          log_debug(
+            "soldiity",
+            "Handling return tuple.\nlhs = {}\nrhs = {}",
+            lhs.to_string(),
+            rhs.to_string());
+          log_error("Internal tuple error.");
+        }
 
         for (size_t i = 0; i < ls; i++)
         {
@@ -2662,7 +2673,7 @@ bool solidity_convertert::get_expr(
         exprt op;
         for (auto i : expr["components"])
         {
-          if (get_expr(i, op))
+          if (get_expr(i, i["typeDescriptions"], op))
             return true;
           if (op.is_nil())
             continue;
