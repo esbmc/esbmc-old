@@ -1,5 +1,5 @@
 FUTURE
 MyContract_overflow_nested.solast
---sol MyContract_overflow_nested.sol
+--sol MyContract_overflow_nested.sol --k-induction
 .*line 16 function func_overflow$
 ^VERIFICATION FAILED$

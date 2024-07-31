@@ -1,4 +1,4 @@
-CORE
+FUTURE
 contract.solast
 --sol contract.sol --unwind 12 --no-unwinding-assertions --force-malloc-success --no-pointer-check --no-div-by-zero-check --no-bounds-check
 ^VERIFICATION FAILED$
