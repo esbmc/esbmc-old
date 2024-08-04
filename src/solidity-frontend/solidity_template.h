@@ -29,6 +29,10 @@ const std::string sol_typedef = R"(
 typedef _ExtInt(256) int256_t;
 typedef unsigned _ExtInt(256) uint256_t;
 typedef unsigned _ExtInt(160) address_t;
+struct _ESBMC_MAPPING_STRING
+{
+    char value[256]; // a string
+};
 )";
 
 /// Variables
@@ -470,7 +474,83 @@ char *u256toa(uint256_t value)
 }
 )";
 
-const std::string sol_ext_library = sol_itoa;
+// string2hex
+const std::string sol_str2hex = R"(
+static const long hextable[] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, -1, -1, -1, -1, -1, -1, -1, 10, 11, 12, 13, 14, 15, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+char *decToHexa(int n)
+{
+    char *hexaDeciNum = (char *)malloc(256 * sizeof(char));
+    hexaDeciNum[0] = '\0';
+    int i = 0;
+    while (n != 0)
+    {
+        int temp = 0;
+        temp = n % 16;
+        if (temp < 10)
+        {
+            hexaDeciNum[i] = temp + 48;
+            i++;
+        }
+        else
+        {
+            hexaDeciNum[i] = temp + 55;
+            i++;
+        }
+
+        n /= 16;
+    }
+    char *ans = (char *)malloc(256 * sizeof(char));
+    ans[0] = '\0';
+    int pos = 0;
+    for (int j = i - 1; j >= 0; j--)
+    {
+        ans[pos] = (char)hexaDeciNum[j];
+        pos++;
+    }
+    ans[pos] = '\0';
+    return ans;
+}
+char *ASCIItoHEX(char *ascii)
+{
+    char *hex = (char *)malloc(256 * sizeof(char));
+    hex[0] = '\0';
+    for (int i = 0; i < strlen(ascii); i++)
+    {
+        char ch = ascii[i];
+        int tmp = (int)ch;
+        char *part = decToHexa(tmp);
+        strcat(hex, part);
+    }
+    return hex;
+}
+long hexdec(const char *hex)
+{
+    /*https://stackoverflow.com/questions/10324/convert-a-hexadecimal-string-to-an-integer-efficiently-in-c*/
+    long ret = 0;
+    while (*hex && ret >= 0)
+    {
+        ret = (ret << 4) | hextable[*hex++];
+    }
+    return ret;
+}
+long str2int(char *str)
+{
+    return hexdec(ASCIItoHEX(str));
+}
+)";
+
+const std::string sol_ext_library = sol_itoa + sol_str2hex;
 
 // combination
 const std::string sol_library = sol_header + sol_typedef + sol_vars +

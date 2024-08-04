@@ -209,8 +209,6 @@ bool solidity_convertert::convert()
         return true;
 
       // handling mapping_init
-      if (move_mapping_to_ctor())
-        return true;
     }
 
     // reset
@@ -595,25 +593,8 @@ bool solidity_convertert::get_var_decl(
   }
   else if (mapping)
   {
-    // the mapping should not handled in var decl, instead
-    // it should be an expression inside the function.
-
-    exprt dump;
-    // 1. get the expr
-    if (get_expr(ast_node, dump))
+    if (get_mapping_type(ast_node, t))
       return true;
-
-    // 2. move it to a function.
-    // Mappings cannot be created dynamically
-    // which means it should not be declared inside a function
-    assert(!current_functionDecl);
-
-    // map_init_int(&m)
-    map_init_block.operands().push_back(dump.op1());
-
-    // map_int_t m
-    new_expr = dump.op0().op0();
-    return false;
   }
   else
   {
@@ -2706,15 +2687,6 @@ bool solidity_convertert::get_expr(
 
     break;
   }
-  case SolidityGrammar::ExpressionT::Mapping:
-  {
-    exprt _block;
-    if (get_mapping_definition(expr, _block))
-      return true;
-
-    new_expr = _block;
-    break;
-  }
   case SolidityGrammar::ExpressionT::CallExprClass:
   {
     side_effect_expr_function_callt call;
@@ -2946,6 +2918,9 @@ bool solidity_convertert::get_expr(
   }
   case SolidityGrammar::ExpressionT::IndexAccess:
   {
+    const nlohmann::json &base_json = expr["baseExpression"];
+    const nlohmann::json &index_json = expr["indexExpression"];
+
     // 1. get type, this is the base type of array
     typet t;
     if (get_type_description(expr["typeDescriptions"], t))
@@ -2953,8 +2928,7 @@ bool solidity_convertert::get_expr(
 
     // for MAPPING
     typet base_t;
-    if (get_type_description(
-          expr["baseExpression"]["typeDescriptions"], base_t))
+    if (get_type_description(base_json["typeDescriptions"], base_t))
       return true;
     if (base_t.get("#sol_type").as_string() == "MAPPING")
     {
@@ -2963,50 +2937,68 @@ bool solidity_convertert::get_expr(
       // here, we convert it to a 'get' and check if it's a 'set' in other places
       // ==> map_get_int(&m, "1234")
 
-      // get m
+      // get base
       exprt base;
-      if (get_expr(
-            expr["baseExpression"],
-            expr["baseExpression"]["typeDescriptions"],
-            base))
-        return true;
-      // &m
-      exprt address_of = address_of_exprt(base);
-
-      // get key
-      // e.g.  "1234", 1234, struct s...
-      // "Let's say you have a mapping mapping(uint => uint) myMapping, then all elements myMapping[0], myMapping[1], myMapping[123123], ... are already initialized with the default value. If you map uint to uint, then you map key-type "uint" to value-type "uint"."
-
-      exprt idx;
-      if (get_mapping_key(expr["indexExpression"], idx))
+      if (get_expr(base_json, base_json["typeDescriptions"], base))
         return true;
 
-      // get func_call
-      std::string _val;
-      if (get_mapping_value_type(t, _val))
+      // if it's string, conert it to member access
+      // e.g. (_ESBMC_MAPPING_STRING)x.value()[i]
+      if (base.type().subtype().get("#sol_type") == "_ESBMC_MAPPING_STRING")
+      {
+        struct_typet st = to_struct_type(
+          (*context.find_symbol("tag-struct _ESBMC_MAPPING_STRING")).type);
+        exprt comp = st.components().at(0);
+        base = member_exprt(base, comp.name(), comp.type());
+      }
+
+      // get pos
+      exprt pos;
+      if (get_expr(index_json, expr["typeDescriptions"], pos))
         return true;
-      std::string func_name = "map_get_" + _val;
-      std::string func_id = "c:@F@map_get_" + _val;
 
-      if (context.find_symbol(func_id) == nullptr)
-        return true;
-      const auto &sym = *context.find_symbol(func_id);
+      // typecast: convert xx => uint
+      const std::string sol_type = pos.type().get("#sol_type").as_string();
+      if (sol_type.compare(0, 3, "INT") == 0)
+      {
+        // e.g. array[s]
+        // symbol
+        //   * type: signedbv
+        //       * width: 8
+        //       * #sol_type: INT8
+        //       * #sol_state_var: 0
+        //   * name: s
+        // convert it to natural numbers by assignment
+        // e.g. int8: x[-127] ==> x[-127 + 127]
 
-      locationt l;
-      get_location_from_decl(expr, l);
+        // do pow
+        int _width = stoi(pos.type().width().as_string());
+        BigInt _add = power(2, _width - 1) - 1;
+        exprt rhs = constant_exprt(
+          integer2binary(_add, _width), integer2string(_add, 10), int_type());
 
-      side_effect_expr_function_callt call_expr;
-      get_library_function_call(func_name, func_id, sym.type, l, call_expr);
+        exprt _assign = side_effect_exprt("assign", int_type());
+        _assign.move_to_operands(pos, rhs);
+      }
+      else if (sol_type == "STRING")
+      {
+        // convert string to hex and then convert hex value to string;
+        // if there is already a hexValue in the node
+        if (!index_json.contains("hexValue"))
+        {
+          std::string hex_val = index_json["hexValue"].get<std::string>();
+          if (convert_hex_literal(hex_val, pos))
+            return true;
+        }
+        // otherwise we need to convert a string to hexadecimal ASCII values first
+        else
+        {
+          // signed char * c:@F@ASCIItoHEX
+          //get_library_function_call("ASCIItoHEX","c:@F@ASCIItoHEX",,);
+        }
+      }
 
-      call_expr.arguments().push_back(address_of);
-      call_expr.arguments().push_back(idx);
-
-      // dereference: *map_get
-      new_expr = dereference_exprt(call_expr, call_expr.type());
-
-      // add label
-      new_expr.type().set("#sol_type", "MAP_GET");
-      new_expr.type().set("#sol_mapping_type", _val);
+      new_expr = index_exprt(base, pos);
       break;
     }
 
@@ -3015,12 +3007,12 @@ bool solidity_convertert::get_expr(
     {
       // this means we are dealing with bytes type
       // jump out if it's "bytes[]" or "bytesN[]" or "func()[]"
-      SolidityGrammar::TypeNameT tname = SolidityGrammar::get_type_name_t(
-        expr["baseExpression"]["typeDescriptions"]);
+      SolidityGrammar::TypeNameT tname =
+        SolidityGrammar::get_type_name_t(base_json["typeDescriptions"]);
       if (
         !(tname == SolidityGrammar::ArrayTypeName ||
           tname == SolidityGrammar::DynArrayTypeName) &&
-        expr["baseExpression"].contains("referencedDeclaration"))
+        base_json.contains("referencedDeclaration"))
       {
         // e.g.
         //    bytes3 x = 0x123456
@@ -3032,16 +3024,15 @@ bool solidity_convertert::get_expr(
         //    x[10] == 0x00 due to the padding
         exprt src_val, src_offset, bswap, bexpr;
 
-        const nlohmann::json &decl = find_decl_ref(
-          expr["baseExpression"]["referencedDeclaration"].get<int>());
+        const nlohmann::json &decl =
+          find_decl_ref(base_json["referencedDeclaration"].get<int>());
         if (decl == empty_json)
           return true;
 
         if (get_var_decl_ref(decl, src_val))
           return true;
 
-        if (get_expr(
-              expr["indexExpression"], expr["typeDescriptions"], src_offset))
+        if (get_expr(index_json, expr["typeDescriptions"], src_offset))
           return true;
 
         // extract particular byte based on idx (offset)
@@ -3059,15 +3050,15 @@ bool solidity_convertert::get_expr(
     exprt array;
 
     // 2.1 arr[n] / x.arr[n]
-    if (expr["baseExpression"].contains("referencedDeclaration"))
+    if (base_json.contains("referencedDeclaration"))
     {
-      if (get_expr(expr["baseExpression"], literal_type, array))
+      if (get_expr(base_json, literal_type, array))
         return true;
     }
     else
     {
       // 2.2 func()[n]
-      const nlohmann::json &decl = expr["baseExpression"];
+      const nlohmann::json &decl = base_json;
       nlohmann::json implicit_cast_expr =
         make_implicit_cast_expr(decl, "ArrayToPointerDecay");
       if (get_expr(implicit_cast_expr, literal_type, array))
@@ -3076,7 +3067,7 @@ bool solidity_convertert::get_expr(
 
     // 3. get the position index
     exprt pos;
-    if (get_expr(expr["indexExpression"], expr["typeDescriptions"], pos))
+    if (get_expr(index_json, expr["typeDescriptions"], pos))
       return true;
 
     // BYTES:  func_ret_bytes()[]
@@ -4144,10 +4135,20 @@ bool solidity_convertert::get_var_decl_ref(
   else
   {
     typet type;
-    if (get_type_description(
-          decl["typeName"]["typeDescriptions"],
-          type)) // "type-name" as in state-variable-declaration
-      return true;
+    if (is_mapping(decl))
+    {
+      exprt map;
+      if (get_var_decl(decl, map))
+        return true;
+      type = map.type();
+    }
+    else
+    {
+      if (get_type_description(
+            decl["typeName"]["typeDescriptions"],
+            type)) // "type-name" as in state-variable-declaration
+        return true;
+    }
 
     // variable with no value
     new_expr = exprt("symbol", type);
@@ -5067,220 +5068,41 @@ void solidity_convertert::get_tuple_assignment(
   _block.move_to_operands(assign_expr);
 }
 
-// get the value type of the mapping
-bool solidity_convertert::get_mapping_value_type(
-  const typet &val_type,
-  std::string &_val)
-{
-  /*
-    _ValueType can be any type, including mappings, arrays and structs
-  */
-  std::string sol_type = val_type.get("#sol_type").as_string();
-  if (sol_type == "MAPPING")
-  {
-    log_error("Unsupported nested mapping");
-    return true;
-  }
-  else if (sol_type.compare(0, 3, "INT") == 0 || sol_type == "ENUM")
-    _val = "int";
-  else if (
-    sol_type.compare(0, 4, "UINT") == 0 ||
-    sol_type.compare(0, 5, "BYTES") == 0 || sol_type == "ADDRESS")
-    _val = "uint";
-  else if (sol_type == "STRING")
-    _val = "string";
-  else if (sol_type == "BOOL")
-    _val = "bool";
-  else if (
-    sol_type == "ARRAY" || sol_type == "DYNARRAY" || sol_type == "STRUCT" ||
-    sol_type == "CONTRACT")
-  {
-    log_error("Unsupported array-type mapping");
-    return true;
-  }
-  return false;
-}
-
-bool solidity_convertert::get_mapping_key(
+bool solidity_convertert::get_mapping_type(
   const nlohmann::json &ast_node,
-  exprt &new_expr)
+  typet &t)
 {
-  /*
-    The _KeyType can be any built-in value type, bytes, string, or any contract or enum type.
-    Other user-defined or complex types, such as mappings, structs or array types are not allowed.
-  */
-  exprt idx;
-  if (get_expr(ast_node, ast_node["typeDescriptions"], idx))
+  // value type:
+  // 1. int/uint
+  // 2. string => struct _ESBMC_MAPPING_STRING
+  // 3. address => uint160
+  // 4. contract/struct => struct type
+  // 4. bool
+  //TODO: support nested structure
+
+  // get element type
+  typet elem_type;
+  if (get_type_description(
+        ast_node["typeName"]["valueType"]["typeDescriptions"], elem_type))
     return true;
 
-  //TODO: not including contract since the contract type is not supported
-  if (
-    idx.type().id() == irept::id_signedbv ||
-    idx.type().id() == irept::id_unsignedbv ||
-    idx.type().id() == irept::id_bool)
+  if (elem_type.get("#sol_type") == "STRING")
   {
-    // int, enum
-    // uint, address, bytes
-    // bool
-
-    // convert int/uint to string via i256toa/u256toa
-    std::string func_id, func_name;
-    typet type_cast;
-    if (idx.type().id() == irept::id_signedbv)
-    {
-      func_name = "i256toa";
-      func_id = "c:@F@i256toa";
-      type_cast = signedbv_typet(256);
-    }
-    else
-    {
-      func_name = "u256toa";
-      func_id = "c:@F@u256toa";
-      type_cast = unsignedbv_typet(256);
-    }
-    const auto &sym = *context.find_symbol(func_id);
-
-    locationt l;
-    get_location_from_decl(ast_node, l);
-
-    side_effect_expr_function_callt call_expr;
-    get_library_function_call(func_name, func_id, sym.type, l, call_expr);
-
-    // gen typecast (necessary?)
-    solidity_gen_typecast(ns, idx, type_cast);
-
-    // pass arg
-    call_expr.arguments().push_back(idx);
-    new_expr = call_expr;
-  }
-  else if (idx.type().id() == irept::id_array)
-  {
-    // string
-    new_expr = idx;
-  }
-  else
-  {
-    log_error(
-      "Unexpected mapping index type, got {}", idx.type().id().as_string());
-    return true;
-  }
-  return false;
-}
-
-/*
-  This function converts
-    mapping(string => int) m;
-  to
-  {
-    map_int_t m;
-    map_init_int(&m);
-  }
-*/
-bool solidity_convertert::get_mapping_definition(
-  const nlohmann::json &ast_node,
-  exprt &new_expr)
-{
-  // get type
-  const auto &val_node = ast_node["typeName"]["valueType"];
-  typet val_type;
-  if (get_type_description(val_node["typeDescriptions"], val_type))
-    return true;
-
-  std::string _val;
-  if (get_mapping_value_type(val_type, _val))
-    return true;
-
-  std::string struct_name = "struct map_" + _val + "_t";
-  std::string struct_id = prefix + struct_name; // e.g. tag-struct map_str_t
-  typet t = symbol_typet(struct_id);
-
-  // get name, id
-  std::string name, id;
-  bool is_state_var = ast_node["stateVariable"] == true;
-  if (is_state_var)
-    get_state_var_decl_name(ast_node, name, id);
-  else if (current_functionDecl)
-  {
-    assert(current_functionName != "");
-    get_var_decl_name(ast_node, name, id);
-  }
-  else
-  {
-    log_error("ESBMC could not find the parent scope for this local variable");
-    return true;
+    // was char-array type, convert it to:
+    // Type........:  struct _ESBMC_MAPPING_STRING [INFINITY()]
+    // Value.......: { { .value = { 0 } } }
+    elem_type = (*context.find_symbol("tag-struct _ESBMC_MAPPING_STRING")).type;
+    elem_type.set("#sol_type", "_ESBMC_MAPPING_STRING");
   }
 
-  // get location
-  locationt location_begin;
-  get_location_from_decl(ast_node, location_begin);
-
-  // get debug module name
-  std::string debug_modulename =
-    get_modulename_from_path(location_begin.file().as_string());
-
-  // populate symbool
-  symbolt symbol;
-  get_default_symbol(symbol, debug_modulename, t, name, id, location_begin);
-  symbol.is_extern = false;
-  if (is_state_var)
-    symbol.static_lifetime = true;
-
-  symbolt &added_symbol = *move_symbol_to_context(symbol);
-  exprt mapping_ins = symbol_expr(added_symbol);
-
-  // get init
-  // e.g. map_init_int(&m);
-  std::string func_name = "map_init_" + _val;
-  std::string func_id = "c:@F@map_init_" + _val;
-
-  side_effect_expr_function_callt call_expr;
-  locationt l;
-  get_location_from_decl(ast_node["typeName"], l);
-
-  if (context.find_symbol(func_id) == nullptr)
-    return true;
-
-  const auto &s = *context.find_symbol(func_id);
-  get_library_function_call(func_name, func_id, s.type, l, call_expr);
-
-  // get address: &m
-  exprt address_of = address_of_exprt(mapping_ins);
-  call_expr.arguments().push_back(address_of);
-
-  // get block
-  code_blockt _block;
-  convert_expression_to_code(mapping_ins);
-  convert_expression_to_code(call_expr);
-  _block.move_to_operands(mapping_ins, call_expr);
-
-  new_expr = _block;
-  return false;
-}
-
-bool solidity_convertert::move_mapping_to_ctor()
-{
-  // no mapping
-  if (map_init_block.operands().size() == 0)
-    return false;
-
-  // get ctor
-  std::string ctor_id;
-  if (get_ctor_call_id(current_contractName, ctor_id))
-    return true;
-  symbolt &ctor = *context.find_symbol(ctor_id);
-
-  if (ctor.value.is_empty())
-  {
-    // empty or implicit ctor
-    ctor.value = map_init_block;
-  }
-  else
-  {
-    // move to operands (insert in the front)
-    for (auto &op : ctor.value.operands())
-      map_init_block.operands().push_back(op);
-    ctor.value.operands() = map_init_block.operands();
-  }
+  // set as infinite array. E.g.
+  //   array
+  //    * size: infinity
+  //        * type: unsignedbv
+  //            * width: 64
+  //    * subtype: bool
+  //        * #cpp_type: bool
+  t = array_typet(elem_type, exprt("infinity"));
   return false;
 }
 

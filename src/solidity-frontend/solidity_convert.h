@@ -179,10 +179,7 @@ protected:
   void get_tuple_function_call(code_blockt &_block, const exprt &op);
 
   // mapping
-  bool get_mapping_definition(const nlohmann::json &ast_node, exprt &new_expr);
-  bool get_mapping_value_type(const typet &val_type, std::string &_val);
-  bool get_mapping_key(const nlohmann::json &ast_node, exprt &new_expr);
-  bool move_mapping_to_ctor();
+  bool get_mapping_type(const nlohmann::json &ast_node, typet &t);
 
   // line number and locations
   void
