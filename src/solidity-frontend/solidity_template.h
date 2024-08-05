@@ -534,17 +534,17 @@ char *ASCIItoHEX(char *ascii)
     }
     return hex;
 }
-long hexdec(const char *hex)
+uint256_t hexdec(const char *hex)
 {
     /*https://stackoverflow.com/questions/10324/convert-a-hexadecimal-string-to-an-integer-efficiently-in-c*/
-    long ret = 0;
-    while (*hex && ret >= 0)
+    uint256_t ret = 0;
+    while (*hex && ret >= (uint256_t)0)
     {
-        ret = (ret << 4) | hextable[*hex++];
+        ret = (ret << (uint256_t)4) | (uint256_t)hextable[*hex++];
     }
     return ret;
 }
-long str2int(char *str)
+uint256_t str2int(char *str)
 {
     return hexdec(ASCIItoHEX(str));
 }

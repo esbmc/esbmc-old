@@ -2453,6 +2453,8 @@ bool solidity_convertert::get_expr(
       {
         if (convert_hex_literal(the_value, new_expr, byte_size * 8))
           return true;
+
+        new_expr.type().set("#sol_type", "INT_CONST");
         break;
       }
       case SolidityGrammar::ElementaryTypeNameT::STRING_LITERAL:
@@ -2466,6 +2468,8 @@ bool solidity_convertert::get_expr(
 
         if (convert_hex_literal(hex_val, new_expr, byte_size * 8))
           return true;
+
+        new_expr.type().set("#sol_type", "STRING");
         break;
       }
       default:
@@ -2485,6 +2489,7 @@ bool solidity_convertert::get_expr(
       {
         if (convert_hex_literal(the_value, new_expr))
           return true;
+        new_expr.type().set("#sol_type", "INT_CONST");
       }
       else if (convert_integer_literal(literal_type, the_value, new_expr))
         return true;
@@ -2500,6 +2505,7 @@ bool solidity_convertert::get_expr(
     {
       if (convert_string_literal(the_value, new_expr))
         return true;
+
       break;
     }
     case SolidityGrammar::ElementaryTypeNameT::ADDRESS:
@@ -2508,6 +2514,7 @@ bool solidity_convertert::get_expr(
       // 20 bytes
       if (convert_hex_literal(the_value, new_expr, 160))
         return true;
+      new_expr.type().set("#sol_type", "ADDRESS");
       break;
     }
     default:
@@ -2959,6 +2966,7 @@ bool solidity_convertert::get_expr(
 
       // typecast: convert xx => uint
       const std::string sol_type = pos.type().get("#sol_type").as_string();
+
       if (sol_type.compare(0, 3, "INT") == 0)
       {
         // e.g. array[s]
@@ -2971,30 +2979,59 @@ bool solidity_convertert::get_expr(
         // convert it to natural numbers by assignment
         // e.g. int8: x[-127] ==> x[-127 + 127]
 
-        // do pow
-        int _width = stoi(pos.type().width().as_string());
-        BigInt _add = power(2, _width - 1) - 1;
-        exprt rhs = constant_exprt(
-          integer2binary(_add, _width), integer2string(_add, 10), int_type());
+        // get type
+        assert(base_json.contains("referencedDeclaration"));
+        nlohmann::json map_node =
+          find_decl_ref(base_json["referencedDeclaration"]);
+        assert(map_node["typeName"].contains("keyType"));
+        typet int_t;
+        if (get_type_description(
+              map_node["typeName"]["keyType"]["typeDescriptions"], int_t))
+          return true;
 
-        exprt _assign = side_effect_exprt("assign", int_type());
-        _assign.move_to_operands(pos, rhs);
+        // get width
+        auto _type = SolidityGrammar::get_elementary_type_name_t(
+          map_node["typeName"]["keyType"]["typeDescriptions"]);
+        unsigned int _width = SolidityGrammar::int_type_name_to_size(_type);
+
+        // do pow
+        BigInt _addend = power(2, _width - 1) - 1;
+        exprt rhs = constant_exprt(
+          integer2binary(_addend, _width), integer2string(_addend, 10), int_t);
+
+        // do add
+        exprt _add = exprt("+", int_t);
+        _add.copy_to_operands(pos, rhs);
+
+        pos = _add;
       }
       else if (sol_type == "STRING")
       {
-        // convert string to hex and then convert hex value to string;
+        // convert string hex literal
         // if there is already a hexValue in the node
-        if (!index_json.contains("hexValue"))
+        if (index_json.contains("hexValue"))
         {
           std::string hex_val = index_json["hexValue"].get<std::string>();
           if (convert_hex_literal(hex_val, pos))
             return true;
         }
-        // otherwise we need to convert a string to hexadecimal ASCII values first
+        // otherwise we need to convert a string to decimal ASCII values
         else
         {
-          // signed char * c:@F@ASCIItoHEX
-          //get_library_function_call("ASCIItoHEX","c:@F@ASCIItoHEX",,);
+          // signed char * c:@F@str2int
+          // e.g. "Geek" => "1197827435"
+          // pos => str2int(pos)
+          side_effect_expr_function_callt _call;
+          get_library_function_call(
+            "str2int",
+            "c:@F@str2int",
+            unsignedbv_typet(256),
+            base.location(),
+            _call);
+
+          // insert arguments
+          _call.arguments().push_back(pos);
+          pos = _call;
         }
       }
 
