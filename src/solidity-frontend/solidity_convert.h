@@ -126,12 +126,16 @@ protected:
     const nlohmann::json &ast_node,
     std::string &name,
     std::string &id);
-  void get_var_decl_name(
+  void get_local_var_decl_name(
     const nlohmann::json &ast_node,
     std::string &name,
     std::string &id);
   void get_function_definition_name(
     const nlohmann::json &ast_node,
+    std::string &name,
+    std::string &id);
+  bool get_var_decl_name(
+    const nlohmann::json &decl,
     std::string &name,
     std::string &id);
   bool get_function_call(
@@ -180,6 +184,12 @@ protected:
 
   // mapping
   bool get_mapping_type(const nlohmann::json &ast_node, typet &t);
+  bool get_mapping_key(const symbolt &sym, const std::string &postfix);
+  void get_mapping_key_name(
+    const std::string &m_name,
+    const std::string &m_id,
+    std::string &k_name,
+    std::string &k_id);
 
   // line number and locations
   void

@@ -117,283 +117,88 @@ const std::string sol_funcs =
 
 /* https://github.com/rxi/map */
 const std::string sol_mapping = R"(
-struct map_node_t;
-typedef struct map_node_t map_node_t;
-
-int zero_int;
-unsigned int zero_uint;
-bool zero_bool;
-char *zero_string;
-
-typedef struct map_base_t
+struct NodeU
 {
-	map_node_t **buckets;
-	unsigned nbuckets, nnodes;
-} map_base_t;
+  uint256_t data : 256;
+  struct Node *next;
+};
 
-typedef struct map_iter_t
+struct NodeI
 {
-	unsigned bucketidx;
-	map_node_t *node;
-} map_iter_t;
+  int256_t data : 256;
+  struct Node *next;
+};
 
-typedef struct map_node_t
+void insertAtEndU(struct NodeU **head, uint256_t data)
 {
-	unsigned hash;
-	void *value;
-	map_node_t *next;
-} map_node_t;
-
-void *map_get_(map_base_t *m, const char *key);
-int map_set_(map_base_t *m, const char *key, void *value, int vsize);
-void map_remove_(map_base_t *m, const char *key);
-
-typedef struct map_int_t
-{
-	map_base_t base;
-	int *ref;
-	int tmp;
-} map_int_t;
-
-typedef struct map_uint_t
-{
-	map_base_t base;
-	unsigned int *ref;
-	unsigned int tmp;
-} map_uint_t;
-
-typedef struct map_string_t
-{
-	map_base_t base;
-	char **ref;
-	char *tmp;
-} map_string_t;
-
-typedef struct map_bool_t
-{
-	map_base_t base;
-	bool *ref;
-	bool tmp;
-} map_bool_t;
-
-/// Init
-void map_init_int(map_int_t *m)
-{
-	memset(m, 0, sizeof(*(m)));
+  struct NodeU *newNode = (struct NodeU *)malloc(sizeof(struct NodeU));
+  newNode->data = data;
+  newNode->next = NULL;
+  if (*head == NULL)
+  {
+    *head = newNode;
+    return;
+  }
+  struct NodeU *current = *head;
+  while (current->next != NULL)
+  {
+    current = current->next;
+  }
+  current->next = newNode;
 }
 
-void map_init_uint(map_uint_t *m)
+void insertAtEndI(struct NodeI **head, int256_t data)
 {
-	memset(m, 0, sizeof(*(m)));
+  struct NodeI *newNode = (struct NodeI *)malloc(sizeof(struct NodeI));
+  newNode->data = data;
+  newNode->next = NULL;
+  if (*head == NULL)
+  {
+    *head = newNode;
+    return;
+  }
+  struct NodeI *current = *head;
+  while (current->next != NULL)
+  {
+    current = current->next;
+  }
+  current->next = newNode;
 }
 
-void map_init_string(map_string_t *m)
+int findKeyU(struct NodeU *head, uint256_t key)
 {
-	memset(m, 0, sizeof(*(m)));
+  struct NodeU *current = head;
+  int cnt = 0;
+  while (current != NULL)
+  {
+    if (current->data == key)
+      return cnt;
+    cnt++;
+    current = current->next;
+  }
+  insertAtEndU(&head, key);
+  return cnt;
 }
 
-void map_init_bool(map_bool_t *m)
+int findKeyI(struct NodeI *head, int256_t key)
 {
-	memset(m, 0, sizeof(*(m)));
-}
-
-/// Set
-void map_set_int(map_int_t *m, const char *key, const int value)
-{
-	(m)->tmp = value;
-	map_set_(&(m)->base, key, &(m)->tmp, sizeof((m)->tmp));
-}
-void map_set_uint(map_uint_t *m, const char *key, const unsigned int value)
-{
-	(m)->tmp = value;
-	map_set_(&(m)->base, key, &(m)->tmp, sizeof((m)->tmp));
-}
-void map_set_string(map_string_t *m, const char *key, char *value)
-{
-	(m)->tmp = value;
-	map_set_(&(m)->base, key, &(m)->tmp, sizeof((m)->tmp));
-}
-void map_set_bool(map_bool_t *m, const char *key, const bool value)
-{
-	(m)->tmp = value;
-	map_set_(&(m)->base, key, &(m)->tmp, sizeof((m)->tmp));
-}
-
-/// Get
-int *map_get_int(map_int_t *m, const char *key)
-{
-	(m)->ref = map_get_(&(m)->base, key);
-	zero_int = 0;
-	return (m)->ref != NULL ? (m)->ref : &zero_int;
-}
-unsigned int *map_get_uint(map_uint_t *m, const char *key)
-{
-	(m)->ref = map_get_(&(m)->base, key);
-	zero_uint = 0;
-	return (m)->ref != NULL ? (m)->ref : &zero_uint;
-}
-char **map_get_string(map_string_t *m, const char *key)
-{
-	(m)->ref = map_get_(&(m)->base, key);
-	zero_string = "0";
-	return (m)->ref != NULL ? (m)->ref : &zero_string;
-}
-bool *map_get_bool(map_bool_t *m, const char *key)
-{
-	(m)->ref = map_get_(&(m)->base, key);
-	zero_bool = false;
-	return (m)->ref != NULL ? (m)->ref : &zero_bool;
-}
-
-/// General
-unsigned map_hash(const char *str)
-{
-	unsigned hash = 5381;
-	// avoid derefencing null ptr
-	if (str != NULL)
-		while (*str)
-		{
-			hash = ((hash << 5) + hash) ^ *str++;
-		}
-	return hash;
-}
-
-map_node_t *map_newnode(const char *key, void *value, int vsize)
-{
-	map_node_t *node;
-	int ksize = strlen(key) + 1;
-	int voffset = ksize + ((sizeof(void *) - ksize) % sizeof(void *));
-	node = malloc(sizeof(*node) + voffset + vsize);
-	if (!node)
-		return NULL;
-	memcpy(node + 1, key, ksize);
-	node->hash = map_hash(key);
-	node->value = ((char *)(node + 1)) + voffset;
-	memcpy(node->value, value, vsize);
-	return node;
-}
-
-int map_bucketidx(map_base_t *m, unsigned hash)
-{
-	return hash & (m->nbuckets - 1);
-}
-
-void map_addnode(map_base_t *m, map_node_t *node)
-{
-	int n = map_bucketidx(m, node->hash);
-	node->next = m->buckets[n];
-	m->buckets[n] = node;
-}
-
-int map_resize(map_base_t *m, int nbuckets)
-{
-	map_node_t *nodes, *node, *next;
-	map_node_t **buckets;
-	int i;
-	nodes = NULL;
-	i = m->nbuckets;
-	while (i--)
-	{
-		node = (m->buckets)[i];
-		while (node)
-		{
-			next = node->next;
-			node->next = nodes;
-			nodes = node;
-			node = next;
-		}
-	}
-	/* Reset buckets */
-	/* --force-malloc-success */
-	buckets = malloc(sizeof(*m->buckets) * nbuckets);
-	if (buckets != NULL)
-	{
-		m->buckets = buckets;
-		m->nbuckets = nbuckets;
-	}
-	if (m->buckets)
-	{
-		memset(m->buckets, 0, sizeof(*m->buckets) * m->nbuckets);
-		/* Re-add nodes to buckets */
-		node = nodes;
-		while (node)
-		{
-			next = node->next;
-			map_addnode(m, node);
-			node = next;
-		}
-	}
-	/* Return error code if realloc() failed */
-	/* --force-malloc-success */
-	return 0;
-}
-
-map_node_t **map_getref(map_base_t *m, const char *key)
-{
-	unsigned hash = map_hash(key);
-	map_node_t **next;
-	if (m->nbuckets > 0)
-	{
-		next = &m->buckets[map_bucketidx(m, hash)];
-		while (*next)
-		{
-			if ((*next)->hash == hash && !strcmp((char *)(*next + 1), key))
-			{
-				return next;
-			}
-			next = &(*next)->next;
-		}
-	}
-	return NULL;
-}
-
-void *map_get_(map_base_t *m, const char *key)
-{
-	map_node_t **next = map_getref(m, key);
-	return next ? (*next)->value : NULL;
-}
-
-int map_set_(map_base_t *m, const char *key, void *value, int vsize)
-{
-	int n, err;
-	map_node_t **next, *node;
-	next = map_getref(m, key);
-	if (next)
-	{
-		memcpy((*next)->value, value, vsize);
-		return 0;
-	}
-	node = map_newnode(key, value, vsize);
-	if (node == NULL)
-		return -1;
-	if (m->nnodes >= m->nbuckets)
-	{
-		n = (m->nbuckets > 0) ? (m->nbuckets << 1) : 1;
-		err = map_resize(m, n);
-		if (err)
-			return -1;
-	}
-	map_addnode(m, node);
-	m->nnodes++;
-	return 0;
-}
-
-void map_remove_(map_base_t *m, const char *key)
-{
-	map_node_t *node;
-	map_node_t **next = map_getref(m, key);
-	if (next)
-	{
-		node = *next;
-		*next = (*next)->next;
-		free(node);
-		m->nnodes--;
-	}
+  struct NodeI *current = head;
+  int cnt = 0;
+  while (current != NULL)
+  {
+    if (current->data == key)
+      return cnt;
+    cnt++;
+    current = current->next;
+  }
+  insertAtEndI(&head, key);
+  return cnt;
 }
 )";
 
 /// external library
 // itoa
+/* 
 const std::string sol_itoa = R"(
 char get_char(int digit)
 {
@@ -473,6 +278,7 @@ char *u256toa(uint256_t value)
 	return str;
 }
 )";
+*/
 
 // string2hex
 const std::string sol_str2hex = R"(
@@ -550,7 +356,7 @@ uint256_t str2int(char *str)
 }
 )";
 
-const std::string sol_ext_library = sol_itoa + sol_str2hex;
+const std::string sol_ext_library = sol_str2hex;
 
 // combination
 const std::string sol_library = sol_header + sol_typedef + sol_vars +
