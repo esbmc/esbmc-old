@@ -120,13 +120,13 @@ const std::string sol_mapping = R"(
 struct NodeU
 {
   uint256_t data : 256;
-  struct Node *next;
+  struct NodeU *next;
 };
 
 struct NodeI
 {
   int256_t data : 256;
-  struct Node *next;
+  struct NodeI *next;
 };
 
 void insertAtEndU(struct NodeU **head, uint256_t data)

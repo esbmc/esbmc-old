@@ -28,6 +28,7 @@ solidity_convertert::solidity_convertert(
     current_scope_var_num(1),
     current_functionDecl(nullptr),
     current_forStmt(nullptr),
+    current_typeName(nullptr),
     current_blockDecl(code_blockt()),
     current_lhsDecl(false),
     current_rhsDecl(false),
@@ -215,6 +216,7 @@ bool solidity_convertert::convert()
     current_contractName = "";
     current_functionName = "";
     current_functionDecl = nullptr;
+    current_typeName = nullptr;
     current_forStmt = nullptr;
     current_blockDecl.clear();
     global_scope_id = 0;
@@ -598,8 +600,11 @@ bool solidity_convertert::get_var_decl(
   }
   else
   {
+    const nlohmann::json *old_typeName = current_typeName;
+    current_typeName = &ast_node["typeName"];
     if (get_type_description(ast_node["typeName"]["typeDescriptions"], t))
       return true;
+    current_typeName = old_typeName;
   }
 
   if (
@@ -824,6 +829,11 @@ bool solidity_convertert::get_struct_class(const nlohmann::json &struct_def)
     SolidityGrammar::ContractBodyElementT type =
       SolidityGrammar::get_contract_body_element_t(*itr);
 
+    log_debug(
+      "solidity",
+      "\t@@@get ContractBodyElementT = {}",
+      SolidityGrammar::contract_body_element_to_str(type));
+
     switch (type)
     {
     case SolidityGrammar::ContractBodyElementT::VarDecl:
@@ -840,11 +850,50 @@ bool solidity_convertert::get_struct_class(const nlohmann::json &struct_def)
       break;
     }
     case SolidityGrammar::ContractBodyElementT::StructDef:
+    {
+      exprt tmp_expr;
+      if (get_noncontract_decl_ref(*itr, tmp_expr))
+        return true;
+
+      struct_typet::componentt comp;
+      comp.swap(tmp_expr);
+      comp.id("component");
+      comp.type().set("#member_name", t.tag());
+
+      if (get_access_from_decl(*itr, comp))
+        return true;
+      t.components().push_back(comp);
+      break;
+    }
     case SolidityGrammar::ContractBodyElementT::EnumDef:
+    {
+      // skip as it do not need to be populated to the value of the struct
+      break;
+    }
     case SolidityGrammar::ContractBodyElementT::ErrorDef:
     case SolidityGrammar::ContractBodyElementT::EventDef:
     {
-      // skip
+      exprt tmp_expr;
+      if (get_noncontract_decl_ref(*itr, tmp_expr))
+        return true;
+
+      struct_typet::componentt comp;
+      comp.swap(tmp_expr);
+      comp.id("component");
+
+      if (comp.is_code() && to_code(comp).statement() == "skip")
+        break;
+
+      if (get_access_from_decl(*itr, comp))
+        return true;
+
+      // set virtual / override
+      if ((*itr).contains("virtual") && (*itr)["virtual"] == true)
+        comp.set("#is_sol_virtual", true);
+      else if ((*itr).contains("overrides"))
+        comp.set("#is_sol_override", true);
+
+      t.methods().push_back(comp);
       break;
     }
     default:
@@ -901,6 +950,43 @@ bool solidity_convertert::get_struct_class_method(
     comp.set("#is_sol_override", true);
 
   type.methods().push_back(comp);
+  return false;
+}
+
+bool solidity_convertert::get_noncontract_decl_ref(
+  const nlohmann::json &decl,
+  exprt &new_expr)
+{
+  if (decl["nodeType"] == "StructDefinition")
+  {
+    std::string id;
+    id = prefix + "struct " + decl["canonicalName"].get<std::string>();
+
+    if (context.find_symbol(id) == nullptr)
+    {
+      if (get_struct_class(decl))
+        return true;
+    }
+
+    new_expr = symbol_expr(*context.find_symbol(id));
+  }
+  else if (decl["nodeType"] == "ErrorDefinition")
+  {
+    std::string name, id;
+    name = decl["name"].get<std::string>();
+    id = "sol:@" + name + "#" + std::to_string(decl["id"].get<int>());
+
+    if (context.find_symbol(id) == nullptr)
+      return true;
+    new_expr = symbol_expr(*context.find_symbol(id));
+  }
+  else if (decl["nodeType"] == "EventDefinition")
+  {
+    // treat event as a function definition
+    if (get_func_decl_ref(decl, new_expr))
+      return true;
+  }
+
   return false;
 }
 
@@ -2351,33 +2437,12 @@ bool solidity_convertert::get_expr(
           if (get_func_decl_ref(decl, new_expr))
             return true;
         }
-        else if (decl["nodeType"] == "StructDefinition")
+        else if (
+          decl["nodeType"] == "StructDefinition" ||
+          decl["nodeType"] == "ErrorDefinition" ||
+          decl["nodeType"] == "EventDefinition")
         {
-          std::string id;
-          id = prefix + "struct " + decl["canonicalName"].get<std::string>();
-
-          if (context.find_symbol(id) == nullptr)
-          {
-            if (get_struct_class(decl))
-              return true;
-          }
-
-          new_expr = symbol_expr(*context.find_symbol(id));
-        }
-        else if (decl["nodeType"] == "ErrorDefinition")
-        {
-          std::string name, id;
-          name = decl["name"].get<std::string>();
-          id = "sol:@" + name + "#" + std::to_string(decl["id"].get<int>());
-
-          if (context.find_symbol(id) == nullptr)
-            return true;
-          new_expr = symbol_expr(*context.find_symbol(id));
-        }
-        else if (decl["nodeType"] == "EventDefinition")
-        {
-          // treat event as a function definition
-          if (get_func_decl_ref(decl, new_expr))
+          if (get_noncontract_decl_ref(decl, new_expr))
             return true;
         }
         else
@@ -2964,7 +3029,8 @@ bool solidity_convertert::get_expr(
       std::string postfix = "U"; // uint
       if (sol_type.compare(0, 3, "INT") == 0)
         postfix = "I"; // int
-      if (get_mapping_key(m_sym, postfix))
+      exprt key_node_instance;
+      if (get_mapping_key_expr(m_sym, postfix, key_node_instance))
         return true;
 
       // get base
@@ -3036,14 +3102,7 @@ bool solidity_convertert::get_expr(
           base.location(),
           _findkey);
 
-      std::string k_name, k_id;
-      get_mapping_key_name(m_name, m_id, k_name, k_id);
-
-      if (context.find_symbol(k_id) == nullptr)
-        return true;
-
       // this->key_x
-      exprt key_node_instance = symbol_expr(*context.find_symbol(k_id));
       exprt this_ptr = base.op0();
       exprt mem_key = member_exprt(
         this_ptr, key_node_instance.name(), key_node_instance.type());
@@ -4183,14 +4242,16 @@ bool solidity_convertert::get_var_decl_ref(
       exprt map;
       if (get_var_decl(decl, map))
         return true;
+      assert(to_code(map).operands().size() >= 1);
       type = to_code(map).op0().type();
     }
     else
     {
-      if (get_type_description(
-            decl["typeName"]["typeDescriptions"],
-            type)) // "type-name" as in state-variable-declaration
+      const nlohmann::json *old_typeName = current_typeName;
+      current_typeName = &decl["typeName"];
+      if (get_type_description(decl["typeName"]["typeDescriptions"], type))
         return true;
+      current_typeName = old_typeName;
     }
 
     // variable with no value
@@ -4502,21 +4563,42 @@ bool solidity_convertert::get_type_description(
     //    "typeString": "uint8[2]"
     // We need to extract the elementary type of array from the information provided above
     // We want to make it like ["baseType"]["typeDescriptions"]
-    nlohmann::json array_elementary_type =
-      make_array_elementary_type(type_name);
-    typet the_type;
-    if (get_type_description(array_elementary_type, the_type))
-      return true;
 
-    assert(the_type.is_unsignedbv()); // assuming array size is unsigned bv
-    std::string the_size = get_array_size(type_name);
-    unsigned z_ext_value = std::stoul(the_size, nullptr);
-    new_type = array_typet(
-      the_type,
-      constant_exprt(
-        integer2binary(z_ext_value, bv_width(int_type())),
-        integer2string(z_ext_value),
-        int_type()));
+    typet the_type;
+    exprt the_size;
+    if (current_typeName != nullptr)
+    {
+      assert((*current_typeName).contains("baseType"));
+      assert((*current_typeName).contains("length"));
+      if (get_type_description(
+            (*current_typeName)["baseType"]["typeDescriptions"], the_type))
+        return true;
+
+      if (get_expr(
+            (*current_typeName)["length"],
+            (*current_typeName)["length"]["typeDescriptions"],
+            the_size))
+        return true;
+      new_type = array_typet(the_type, the_size);
+    }
+    else
+    {
+      nlohmann::json array_elementary_type =
+        make_array_elementary_type(type_name);
+
+      if (get_type_description(array_elementary_type, the_type))
+        return true;
+
+      assert(the_type.is_unsignedbv()); // assuming array size is unsigned bv
+      std::string the_size = get_array_size(type_name);
+      unsigned z_ext_value = std::stoul(the_size, nullptr);
+      new_type = array_typet(
+        the_type,
+        constant_exprt(
+          integer2binary(z_ext_value, bv_width(int_type())),
+          integer2string(z_ext_value),
+          int_type()));
+    }
 
     new_type.set("#sol_type", "ARRAY");
     break;
@@ -5134,8 +5216,11 @@ bool solidity_convertert::get_mapping_type(
     // was char-array type, convert it to:
     // Type........:  struct _ESBMC_MAPPING_STRING [INFINITY()]
     // Value.......: { { .value = { 0 } } }
-    elem_type = (*context.find_symbol("tag-struct _ESBMC_MAPPING_STRING")).type;
+    if (context.find_symbol("tag-struct _ESBMC_MAPPING_STRING") == nullptr)
+      return true;
+    elem_type = symbol_typet("tag-struct _ESBMC_MAPPING_STRING");
     elem_type.set("#sol_type", "_ESBMC_MAPPING_STRING");
+    elem_type.tag("struct _ESBMC_MAPPING_STRING");
   }
 
   //TODO set as infinite array. E.g.
@@ -5149,27 +5234,32 @@ bool solidity_convertert::get_mapping_type(
   // t.set("#sol_type", "MAPPING");
 
   // For now, we set it as a relatively large array
-  BigInt value_length = 512;
+  // if the value_length is too large, the efficiency will be affected.
+  BigInt value_length = 50;
   t = array_typet(
     elem_type,
     constant_exprt(
-      integer2binary(value_length, bv_width(int_type())),
+      integer2binary(value_length, bv_width(unsignedbv_typet(8))),
       integer2string(value_length),
-      int_type()));
+      unsignedbv_typet(8)));
   // ? MAPPING_INSTANCE?
   t.set("#sol_type", "MAPPING");
 
   return false;
 }
 
-bool solidity_convertert::get_mapping_key(
+bool solidity_convertert::get_mapping_key_expr(
   const symbolt &sym,
-  const std::string &postfix)
+  const std::string &postfix,
+  exprt &new_expr)
 {
   std::string name, id;
   get_mapping_key_name(sym.name.as_string(), sym.id.as_string(), name, id);
   if (context.find_symbol(id) != nullptr)
+  {
+    new_expr = symbol_expr(*context.find_symbol(id));
     return false;
+  }
 
   std::string struct_node_id = "tag-struct Node" + postfix;
   if (context.find_symbol(struct_node_id) == nullptr)
@@ -5202,14 +5292,15 @@ bool solidity_convertert::get_mapping_key(
   auto &struct_sym = *context.find_symbol(struct_id);
 
   //? check duplicate?
-  exprt new_expr = exprt("symbol", symbol_expr(added_sym).type());
-  new_expr.identifier(id);
-  new_expr.cmt_lvalue(true);
-  new_expr.name(name);
-  new_expr.pretty_name(name);
+  exprt tmp_expr = exprt("symbol", symbol_expr(added_sym).type());
+  tmp_expr.identifier(id);
+  tmp_expr.cmt_lvalue(true);
+  tmp_expr.name(name);
+  tmp_expr.pretty_name(name);
+  new_expr = tmp_expr;
 
   struct_typet::componentt comp;
-  comp.swap(new_expr);
+  comp.swap(tmp_expr);
   comp.id("component");
   comp.type().set("#member_name", struct_sym.type.tag());
   comp.set_access("private");
@@ -5627,17 +5718,8 @@ bool solidity_convertert::get_var_decl_name(
     if (c_name.empty() && decl["mutability"] == "constant")
       // global variable
       get_state_var_decl_name(decl, name, id);
-    else if (current_functionDecl)
-    {
-      assert(current_functionName != "");
-      get_local_var_decl_name(decl, name, id);
-    }
     else
-    {
-      log_error(
-        "ESBMC could not find the parent scope for this local variable");
-      return true;
-    }
+      get_local_var_decl_name(decl, name, id);
   }
 
   return false;
@@ -5679,6 +5761,7 @@ void solidity_convertert::get_local_var_decl_name(
   {
     // This means we are handling a local variable which is not inside a function body.
     //! Assume it is a variable inside struct/error
+    //TODO: add current_StructDecl/ current_ErrorDecl
     int scp = ast_node["scope"].get<int>();
     if (scope_map.count(scp) == 0)
     {

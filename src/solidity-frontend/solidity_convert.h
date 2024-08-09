@@ -56,6 +56,8 @@ protected:
 
   // handle the non-contract definition, including struct/enum/error/event/abstract/...
   bool get_noncontract_defition(nlohmann::json &ast_node);
+  bool
+  get_noncontract_decl_ref(const nlohmann::json &ast_node, exprt &new_expr);
   bool get_struct_class(const nlohmann::json &ast_node);
   void add_enum_member_val(nlohmann::json &ast_node);
   bool get_error_definition(const nlohmann::json &ast_node);
@@ -184,7 +186,10 @@ protected:
 
   // mapping
   bool get_mapping_type(const nlohmann::json &ast_node, typet &t);
-  bool get_mapping_key(const symbolt &sym, const std::string &postfix);
+  bool get_mapping_key_expr(
+    const symbolt &sym,
+    const std::string &postfix,
+    exprt &new_expr);
   void get_mapping_key_name(
     const std::string &m_name,
     const std::string &m_id,
@@ -281,6 +286,7 @@ protected:
   unsigned int current_scope_var_num;
   const nlohmann::json *current_functionDecl;
   const nlohmann::json *current_forStmt;
+  const nlohmann::json *current_typeName;
   //TODO: store multiple exprt and flatten the block later
   code_blockt current_blockDecl;
   // for tuple
