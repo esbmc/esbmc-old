@@ -29,10 +29,6 @@ const std::string sol_typedef = R"(
 typedef _ExtInt(256) int256_t;
 typedef unsigned _ExtInt(256) uint256_t;
 typedef unsigned _ExtInt(160) address_t;
-struct _ESBMC_MAPPING_STRING
-{
-    char value[256]; // a string
-};
 )";
 
 /// Variables

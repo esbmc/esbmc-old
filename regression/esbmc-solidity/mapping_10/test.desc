@@ -1,4 +1,4 @@
-FUTURE
+CORE
 contract.solast
 --sol contract.sol --unwind 7 --no-unwinding-assertions --force-malloc-success
 ^VERIFICATION SUCCESSFUL$

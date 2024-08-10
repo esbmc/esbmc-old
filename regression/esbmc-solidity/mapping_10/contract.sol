@@ -4,7 +4,7 @@ pragma solidity >=0.5.0;
 contract Base {
     mapping(int => int) test;
 
-    constructor() {
+    function tes2t() public {
         uint y = 1;
         test[int(y)] += re();
         assert(test[re()] == re());

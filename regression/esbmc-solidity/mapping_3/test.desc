@@ -1,4 +1,4 @@
-FUTURE
+CORE
 contract.solast
---sol contract.sol --unwind 3 --no-unwinding-assertions --force-malloc-success --contract Base --function Base --no-pointer-check
+--sol contract.sol --unwind 3 --no-unwinding-assertions --force-malloc-success --contract Base --no-pointer-check
 ^VERIFICATION SUCCESSFUL$

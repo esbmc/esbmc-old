@@ -920,6 +920,16 @@ bool solidity_convertert::get_struct_class_fields(
     return true;
 
   comp.id("component");
+  if (comp.type().get_bool("#extint"))
+  {
+    typet t;
+    if (get_type_description(ast_node["typeName"]["typeDescriptions"], t))
+      return true;
+
+    comp.type().set("#bitfield", true);
+    comp.type().subtype() = t;
+    comp.set_is_unnamed_bitfield(false);
+  }
   comp.type().set("#member_name", type.tag());
 
   if (get_access_from_decl(ast_node, comp))
@@ -5213,14 +5223,9 @@ bool solidity_convertert::get_mapping_type(
 
   if (elem_type.get("#sol_type") == "STRING")
   {
-    // was char-array type, convert it to:
-    // Type........:  struct _ESBMC_MAPPING_STRING [INFINITY()]
-    // Value.......: { { .value = { 0 } } }
-    if (context.find_symbol("tag-struct _ESBMC_MAPPING_STRING") == nullptr)
-      return true;
-    elem_type = symbol_typet("tag-struct _ESBMC_MAPPING_STRING");
-    elem_type.set("#sol_type", "_ESBMC_MAPPING_STRING");
-    elem_type.tag("struct _ESBMC_MAPPING_STRING");
+    // TODO: FIXME! We treat string as uint256
+    elem_type = unsignedbv_typet(256);
+    elem_type.set("sol_type", "STRING");
   }
 
   //TODO set as infinite array. E.g.
@@ -5551,9 +5556,6 @@ bool solidity_convertert::get_elementary_type_name(
 
     new_type = unsignedbv_typet(160);
 
-    // avoid alignment checking failure
-    new_type.set("alignment", constant_exprt(32, unsignedbv_typet(256)));
-
     // for type conversion
     new_type.set("#sol_type", elementary_type_name_to_str(type));
     new_type.set("#sol_type", "ADDRESS");
@@ -5616,6 +5618,21 @@ bool solidity_convertert::get_elementary_type_name(
       SolidityGrammar::elementary_type_name_to_str(type));
     assert(!"Unimplemented type in rule elementary-type-name");
     return true;
+  }
+  }
+
+  // set #extint
+  switch (type)
+  {
+  case SolidityGrammar::ElementaryTypeNameT::BOOL:
+  case SolidityGrammar::ElementaryTypeNameT::STRING:
+  {
+    break;
+  }
+  default:
+  {
+    new_type.set("#extint", true);
+    break;
   }
   }
 
