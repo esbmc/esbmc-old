@@ -40,7 +40,8 @@ solidity_convertert::solidity_convertert(
     base_contracts(empty_json),
     is_contract_member_access(false),
     tgt_func(config.options.get_option("function")),
-    tgt_cnt(config.options.get_option("contract"))
+    tgt_cnt(config.options.get_option("contract")),
+    aux_counter(0)
 {
   std::ifstream in(_contract_path);
   contract_contents.assign(
@@ -575,25 +576,8 @@ bool solidity_convertert::get_var_decl(
   // to improve the re-usability of get_type* function, when dealing with non-array var decls.
   // For array, do NOT use ["typeName"]. Otherwise, it will cause problem
   // when populating typet in get_cast
-  bool dyn_array = is_dyn_array(ast_node);
   bool mapping = is_mapping(ast_node);
-  if (dyn_array)
-  {
-    if (ast_node.contains("initialValue"))
-    {
-      // append size expr in typeDescription JSON object
-      const nlohmann::json &type_descriptor =
-        add_dyn_array_size_expr(ast_node["typeDescriptions"], ast_node);
-      if (get_type_description(type_descriptor, t))
-        return true;
-    }
-    else
-    {
-      if (get_type_description(ast_node["typeDescriptions"], t))
-        return true;
-    }
-  }
-  else if (mapping)
+  if (mapping)
   {
     if (get_mapping_type(ast_node, t))
       return true;
@@ -741,11 +725,43 @@ bool solidity_convertert::get_var_decl(
     decl.operands().push_back(val);
   }
 
+  // for array
+  if (t.get("#sol_type").as_string() == "ARRAY" && !has_init && !is_inherited)
+  {
+    // int[2] p
+    // => int* p = [0, 0];
+
+    // get elem_type
+    typet elem_type = t.subtype();
+
+    // get size
+    std::string _size = t.get("#sol_array_size").as_string();
+    assert(!_size.empty());
+    exprt size_expr = constant_exprt(
+      integer2binary(string2integer(_size), bv_width(size_type())),
+      _size,
+      size_type());
+
+    // construct array
+    typet arr_type = array_typet(elem_type, size_expr);
+    arr_type.set("#sol_type", "ARRAY");
+    arr_type.set("#sol_array_size", "0");
+    exprt val = exprt(irept::id_array, arr_type);
+
+    // construct auxiliary local var
+    convert_type_expr(ns, val, t);
+
+    added_symbol.value = val;
+    decl.operands().push_back(val);
+  }
+
   // store state variable, which will be initialized in the constructor
   // note that for the state variables that do not have initializer
   // we have already set it as zero value
   if (is_state_var && !is_inherited)
+  {
     initializers.insert(&added_symbol);
+  }
 
   decl.location() = location_begin;
   new_expr = decl;
@@ -876,16 +892,11 @@ bool solidity_convertert::get_struct_class(const nlohmann::json &struct_def)
       exprt tmp_expr;
       if (get_noncontract_decl_ref(*itr, tmp_expr))
         return true;
-
       struct_typet::componentt comp;
       comp.swap(tmp_expr);
-      comp.id("component");
 
       if (comp.is_code() && to_code(comp).statement() == "skip")
         break;
-
-      if (get_access_from_decl(*itr, comp))
-        return true;
 
       // set virtual / override
       if ((*itr).contains("virtual") && (*itr)["virtual"] == true)
@@ -920,16 +931,17 @@ bool solidity_convertert::get_struct_class_fields(
     return true;
 
   comp.id("component");
-  if (comp.type().get_bool("#extint"))
-  {
-    typet t;
-    if (get_type_description(ast_node["typeName"]["typeDescriptions"], t))
-      return true;
+  // TODO: add bitfield
+  // if (comp.type().get_bool("#extint"))
+  // {
+  //   typet t;
+  //   if (get_type_description(ast_node["typeName"]["typeDescriptions"], t))
+  //     return true;
 
-    comp.type().set("#bitfield", true);
-    comp.type().subtype() = t;
-    comp.set_is_unnamed_bitfield(false);
-  }
+  //   comp.type().set("#bitfield", true);
+  //   comp.type().subtype() = t;
+  //   comp.set_is_unnamed_bitfield(false);
+  // }
   comp.type().set("#member_name", type.tag());
 
   if (get_access_from_decl(ast_node, comp))
@@ -1962,7 +1974,8 @@ bool solidity_convertert::get_statement(
   }
   case SolidityGrammar::StatementT::ExpressionStatement:
   {
-    if (get_expr(stmt["expression"], new_expr))
+    if (get_expr(
+          stmt["expression"], stmt["expression"]["typeDescriptions"], new_expr))
       return true;
     break;
   }
@@ -2640,6 +2653,7 @@ bool solidity_convertert::get_expr(
       exprt inits;
       inits = gen_zero(arr_type);
       inits.type().set("#sol_type", "ARRAY");
+      inits.type().set("#sol_array_size", size.cformat().as_string());
 
       // populate array
       int i = 0;
@@ -2652,7 +2666,7 @@ bool solidity_convertert::get_expr(
         inits.operands().at(i) = init;
         i++;
       }
-
+      inits.id("array");
       new_expr = inits;
       break;
     }
@@ -3738,6 +3752,9 @@ bool solidity_convertert::get_binary_operator_expr(
       return false;
     }
 
+    else if (lt.get("#sol_type") == "ARRAY" && rt.get("#sol_type") == "ARRAY")
+      convert_type_expr(ns, rhs, lt);
+
     new_expr = side_effect_exprt("assign", t);
     break;
   }
@@ -4566,6 +4583,7 @@ bool solidity_convertert::get_type_description(
     break;
   }
   case SolidityGrammar::TypeNameT::ArrayTypeName:
+  case SolidityGrammar::TypeNameT::DynArrayTypeName:
   {
     // Deal with array with constant size, e.g., int a[2]; Similar to clang::Type::ConstantArray
     // array's typeDescription is in a compact form, e.g.:
@@ -4578,21 +4596,30 @@ bool solidity_convertert::get_type_description(
     exprt the_size;
     if (current_typeName != nullptr)
     {
+      // access from get_var_decl
       assert((*current_typeName).contains("baseType"));
-      assert((*current_typeName).contains("length"));
       if (get_type_description(
             (*current_typeName)["baseType"]["typeDescriptions"], the_type))
         return true;
 
-      if (get_expr(
-            (*current_typeName)["length"],
-            (*current_typeName)["length"]["typeDescriptions"],
-            the_size))
-        return true;
-      new_type = array_typet(the_type, the_size);
+      new_type = gen_pointer_type(the_type);
+      if ((*current_typeName).contains("length"))
+      {
+        assert(type == SolidityGrammar::TypeNameT::ArrayTypeName);
+        std::string length =
+          (*current_typeName)["length"]["value"].get<std::string>();
+        new_type.set("#sol_array_size", length);
+        new_type.set("#sol_type", "ARRAY");
+      }
+      else
+      {
+        assert(type == SolidityGrammar::TypeNameT::DynArrayTypeName);
+        new_type.set("#sol_type", "DYNARRAY");
+      }
     }
-    else
+    else if (type == SolidityGrammar::TypeNameT::ArrayTypeName)
     {
+      // for tuple array
       nlohmann::json array_elementary_type =
         make_array_elementary_type(type_name);
 
@@ -4608,51 +4635,8 @@ bool solidity_convertert::get_type_description(
           integer2binary(z_ext_value, bv_width(int_type())),
           integer2string(z_ext_value),
           int_type()));
-    }
-
-    new_type.set("#sol_type", "ARRAY");
-    break;
-  }
-  case SolidityGrammar::TypeNameT::DynArrayTypeName:
-  {
-    // Dynamic array in Solidity is complicated. We have
-    // 1. dynamic_memory: which will convert to fixed array and
-    //    cannot be modified once got allocated. This can be seen
-    //    as a fixed array whose length will be set later.
-    //    e.g.
-    //      uint[] memory data;
-    //      data = new uint[](10);
-    //    and
-    //      uint[] memory data = new uint[](10);
-    // 2. dynamic_storage: which can be re-allocated or changed at any time.
-    //    e.g.
-    //      uint[] data;
-    //      func(){ data = [1,2,3]; data = new uint[](10); }
-    //    and
-    //      data.pop(); data.push();
-    //    Idealy, this should be set as a vector_type.
-    exprt size_expr;
-
-    if (type_name.contains("sizeExpr"))
-    {
-      // dynamic memory with initial list
-
-      const nlohmann::json &rtn_expr = type_name["sizeExpr"];
-      // wrap it in an ImplicitCastExpr to convert LValue to RValue
-      nlohmann::json implicit_cast_expr =
-        make_implicit_cast_expr(rtn_expr, "LValueToRValue");
-
-      assert(rtn_expr.contains("typeDescriptions"));
-      nlohmann::json l_type = rtn_expr["typeDescriptions"];
-      if (get_expr(implicit_cast_expr, l_type, size_expr))
-        return true;
-      typet subtype;
-      nlohmann::json array_elementary_type =
-        make_array_elementary_type(type_name);
-      if (get_type_description(array_elementary_type, subtype))
-        return true;
-
-      new_type = array_typet(subtype, size_expr);
+      new_type.set("#sol_array_size", the_size);
+      new_type.set("#sol_type", "ARRAY");
     }
     else
     {
@@ -4677,9 +4661,9 @@ bool solidity_convertert::get_type_description(
 
       // 3. make pointer
       new_type = gen_pointer_type(sub_type);
+      new_type.set("#sol_type", "DYNARRAY");
     }
 
-    new_type.set("#sol_type", "DYNARRAY");
     break;
   }
   case SolidityGrammar::TypeNameT::ContractTypeName:
@@ -5225,7 +5209,7 @@ bool solidity_convertert::get_mapping_type(
   {
     // TODO: FIXME! We treat string as uint256
     elem_type = unsignedbv_typet(256);
-    elem_type.set("sol_type", "STRING");
+    elem_type.set("#sol_type", "STRING");
   }
 
   //TODO set as infinite array. E.g.
@@ -5621,20 +5605,20 @@ bool solidity_convertert::get_elementary_type_name(
   }
   }
 
-  // set #extint
-  switch (type)
-  {
-  case SolidityGrammar::ElementaryTypeNameT::BOOL:
-  case SolidityGrammar::ElementaryTypeNameT::STRING:
-  {
-    break;
-  }
-  default:
-  {
-    new_type.set("#extint", true);
-    break;
-  }
-  }
+  //TODO set #extint
+  // switch (type)
+  // {
+  // case SolidityGrammar::ElementaryTypeNameT::BOOL:
+  // case SolidityGrammar::ElementaryTypeNameT::STRING:
+  // {
+  //   break;
+  // }
+  // default:
+  // {
+  //   new_type.set("#extint", true);
+  //   break;
+  // }
+  // }
 
   return false;
 }
@@ -5661,12 +5645,23 @@ bool solidity_convertert::get_parameter_list(
   }
   case SolidityGrammar::ParameterListT::ONE_PARAM:
   {
-    assert(
-      type_name["parameters"].size() ==
-      1); // TODO: Fix me! assuming one return parameter
-    const nlohmann::json &rtn_type =
-      type_name["parameters"].at(0)["typeDescriptions"];
-    return get_type_description(rtn_type, new_type);
+    assert(type_name["parameters"].size() == 1);
+
+    const nlohmann::json &rtn_type = type_name["parameters"].at(0);
+    if (rtn_type.contains("typeName"))
+    {
+      const nlohmann::json *old_typeName = current_typeName;
+      current_typeName = &rtn_type["typeName"];
+      if (get_type_description(
+            rtn_type["typeName"]["typeDescriptions"], new_type))
+        return true;
+      current_typeName = old_typeName;
+    }
+    else
+    {
+      if (get_type_description(rtn_type["typeDescriptions"], new_type))
+        return true;
+    }
 
     break;
   }
@@ -6871,7 +6866,6 @@ void solidity_convertert::convert_type_expr(
   const typet &dest_type)
 {
   typet src_type = src_expr.type();
-
   if (src_type != dest_type)
   {
     // only do conversion when the src.type != dest.type
@@ -6901,10 +6895,31 @@ void solidity_convertert::convert_type_expr(
 
       src_expr = bswap_expr;
     }
-    else if (src_type.get("#sol_type") == "ARRAY")
+    else if (
+      src_type.get("#sol_type") == "ARRAY" &&
+      dest_type.get("#sol_type") == "ARRAY" && src_type.id() == typet::id_array)
     {
-      assert(src_type.id() == typet::t_array);
-      assert(dest_type.is_array());
+      // this means we are handling a src constant array
+      // which should be assigned to an array pointer
+      if (dest_type.id() != typet::id_pointer)
+      {
+        log_error(
+          "Expecting dest_type to be pointer type, got = {}",
+          dest_type.id().as_string());
+        abort();
+      }
+
+      const std::string src_size = src_type.get("#sol_array_size").as_string();
+      const std::string dest_size =
+        dest_type.get("#sol_array_size").as_string();
+      assert(!src_size.empty());
+      assert(!dest_size.empty());
+      unsigned z_src_size = std::stoul(src_size, nullptr);
+      unsigned z_dest_size = std::stoul(dest_size, nullptr);
+      constant_exprt dest_array_size = constant_exprt(
+        integer2binary(z_dest_size, bv_width(int_type())),
+        integer2string(z_dest_size),
+        int_type());
 
       if (src_expr.id() == irept::id_member)
       {
@@ -6912,14 +6927,13 @@ void solidity_convertert::convert_type_expr(
         // where [1,2] ==> uint8[] ==> tuple_instance.mem0
         // ==>
         //  x  = [（uint256)tuple_instance.mem0[0], （uint256)tuple_instance.mem0[1], 0]
-
-        array_typet arr_t = to_array_type(dest_type);
+        // - src_expr: [1, z]
+        // - dest_type: uint*
+        array_typet arr_t = array_typet(dest_type.subtype(), dest_array_size);
         exprt new_arr = exprt(irept::id_array, arr_t);
-        int old_size =
-          stoi(to_array_type(src_type).size().cformat().as_string());
 
         exprt arr_comp;
-        for (int i = 0; i < old_size; i++)
+        for (unsigned i = 0; i < z_src_size; i++)
         {
           // do array index
           exprt idx = constant_exprt(
@@ -6940,26 +6954,58 @@ void solidity_convertert::convert_type_expr(
       if (src_expr.id() == irept::id_array)
       {
         // e.g. uint[3] x = [1] ==> uint[3] x == [1,0,0]
-        int d_size =
-          stoi(to_array_type(dest_type).size().cformat().as_string());
-        int s_size = src_expr.operands().size();
-        if (d_size > s_size)
+        unsigned s_size = src_expr.operands().size();
+        if (s_size != z_src_size)
+        {
+          log_error(
+            "Expecting equivalent array size, got {} and {}",
+            std::to_string(s_size),
+            std::to_string(z_src_size));
+          abort();
+        }
+        if (z_dest_size > s_size)
         {
           exprt _zero =
             gen_zero(get_complete_type(src_type.subtype(), ns), true);
           _zero.location() = src_expr.location();
           _zero.set("#cformat", 0);
           // push zero
-          for (int i = s_size; i < d_size; i++)
+          for (unsigned i = s_size; i < z_dest_size; i++)
             src_expr.operands().push_back(_zero);
 
           // reset size
-          to_array_type(src_expr.type()).size() =
-            to_array_type(dest_type).size();
+          to_array_type(src_expr.type()).size() = dest_array_size;
         }
-      }
 
-      solidity_gen_typecast(ns, src_expr, dest_type);
+        // since it's a constant array, we could safely make it to a local var
+        // this local var will not be referred again so the name could be random.
+        // e.g.
+        // int[3] p = [1,2];
+        // => int *p = [1,2,3];
+        // => int[3] tmp = [1,2,3]; int *p = tmp;
+        std::string aux_name;
+        std::string aux_id;
+        do
+        {
+          aux_name = "__ESBMC_tmp_array" + std::to_string(aux_counter);
+          aux_id = "sol:@" + aux_name;
+          ++aux_counter;
+        } while (context.find_symbol(aux_id) != nullptr);
+
+        locationt loc = src_expr.location();
+        std::string debug_modulename = "C++";
+        symbolt sym;
+        get_default_symbol(
+          sym, debug_modulename, src_expr.type(), aux_name, aux_id, loc);
+        sym.static_lifetime = false;
+        sym.is_extern = false;
+        sym.lvalue = false;
+
+        symbolt &added_symbol = *move_symbol_to_context(sym);
+
+        added_symbol.value = src_expr;
+        src_expr = symbol_expr(added_symbol);
+      }
     }
     else
       solidity_gen_typecast(ns, src_expr, dest_type);

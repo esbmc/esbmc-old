@@ -338,6 +338,9 @@ protected:
   // --contract
   std::string tgt_cnt;
 
+  // for auxiliary var name
+  int aux_counter;
+
 private:
   bool get_elementary_type_name_uint(
     SolidityGrammar::ElementaryTypeNameT &type,

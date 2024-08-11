@@ -908,27 +908,10 @@ void dereferencet::build_reference_rec(
     flags |= flag_dst_scalar;
   else if (is_array_type(type))
   {
-    /*
-      contract Base
-      {
-        uint[3] x;
-        constructor()
-        {
-          if(rand) x = [1, 2, 3];
-          else x = [4, 5, 6];
-          x[3]; // out_of_bound 
-        }
-      }
-    */
-    std::string sol;
-    options.get_option("sol", sol);
-    if (sol.empty())
-    {
-      log_error(
-        "Can't construct rvalue reference to array type during dereference\n"
-        "(It isn't allowed by C anyway)\n");
-      abort();
-    }
+    log_error(
+      "Can't construct rvalue reference to array type during dereference\n"
+      "(It isn't allowed by C anyway)\n");
+    abort();
   }
   else
   {
