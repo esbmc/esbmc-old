@@ -100,6 +100,10 @@ protected:
     const nlohmann::json &expr,
     const nlohmann::json &expr_common_type,
     exprt &new_expr);
+  bool get_init_expr(
+    const nlohmann::json &ast_node,
+    const typet &dest_type,
+    exprt &new_expr);
   bool get_binary_operator_expr(const nlohmann::json &expr, exprt &new_expr);
   bool get_compound_assign_expr(const nlohmann::json &expr, exprt &new_expr);
   bool get_unary_operator_expr(
@@ -312,7 +316,7 @@ protected:
   // Store the ast_node["id"] of contract/struct/function/...
   std::unordered_map<int, std::string> scope_map;
   // Store state variables
-  std::unordered_set<symbolt *> initializers;
+  std::vector<symbolt *> initializers;
   // For inheritance
   nlohmann::json ctor_modifier;
   nlohmann::json base_contracts;

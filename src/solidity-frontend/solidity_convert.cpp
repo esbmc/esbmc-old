@@ -387,7 +387,7 @@ bool solidity_convertert::convert_ast_nodes(const nlohmann::json &contract_def)
     std::string node_type = ast_node["nodeType"].get<std::string>();
     log_debug(
       "solidity",
-      "@@ Converting node[{}]: name={}, nodeType={} ...",
+      "@@@ Converting node[{}]: name={}, nodeType={} ...",
       index,
       node_name.c_str(),
       node_type.c_str());
@@ -423,7 +423,7 @@ bool solidity_convertert::get_non_function_decl(
 
   log_debug(
     "solidity",
-    "Expecting non-function definition, Got {}",
+    "\t@@@ Expecting non-function definition, Got {}",
     SolidityGrammar::contract_body_element_to_str(type));
 
   // based on each element as in Solidty grammar "rule contract-body-element"
@@ -463,7 +463,7 @@ bool solidity_convertert::get_function_decl(const nlohmann::json &ast_node)
 
   log_debug(
     "solidity",
-    "Expecting function definition, Got {}",
+    "\t@@@ Expecting function definition, Got {}",
     SolidityGrammar::contract_body_element_to_str(type));
 
   // based on each element as in Solidty grammar "rule contract-body-element"
@@ -675,19 +675,187 @@ bool solidity_convertert::get_var_decl(
   // 7. populate init value if there is any
   code_declt decl(symbol_expr(added_symbol));
 
+  // special handling for array/dynarray
+  if (
+    t.get("#sol_type").as_string() == "ARRAY" ||
+    (t.get("#sol_type").as_string() == "DYNARRAY" && has_init))
+  {
+    /** 
+      uint[2] z;            // uint *z = calloc(2, sizeof(uint));
+      
+                            // uint *zz = calloc(2,sizeof(uint));
+                            // uint tmp1[2] = {1,2}; 
+      uint[2] zz = [1,2];   // memcpy(zzzz, tmp2, 2*sizeof(uint));
+
+      uint[] zzz;           // uint* zzz = 0;
+
+                            // uint* zzzz = calloc(2,sizeof(uint));
+                            // uint tmp2[2] = {1,2};
+      uint[] zzzz = [1,2];  // memcpy(zzzz, tmp2, 2*sizeof(uint));
+
+      Theoretically we can convert it to something like int *z = new int[2]{0,1};
+      However, this feature seems to be not fully supported in current esbmc-cpp (v7.6.1)
+    **/
+
+    // construct calloc call
+    const std::string calc_name = "calloc";
+    const std::string calc_id = "c:@F@calloc";
+    const symbolt &calc_sym = *context.find_symbol(calc_id);
+    side_effect_expr_function_callt calc_call;
+    get_library_function_call(
+      calc_name,
+      calc_id,
+      symbol_expr(calc_sym).type(),
+      location_begin,
+      calc_call);
+
+    // construct memcpy call
+    const std::string memc_name = "memcpy";
+    const std::string memc_id = "c:@F@memcpy";
+    const symbolt &memc_sym = *context.find_symbol(memc_id);
+    side_effect_expr_function_callt memc_call;
+    get_library_function_call(
+      memc_name,
+      memc_id,
+      symbol_expr(memc_sym).type(),
+      location_begin,
+      memc_call);
+
+    if (t.get("#sol_type").as_string() == "ARRAY")
+    {
+      // 0. get lhs array size
+      std::string arr_size = t.get("#sol_array_size").as_string();
+      assert(!arr_size.empty());
+      exprt size_expr = constant_exprt(
+        integer2binary(string2integer(arr_size), bv_width(uint_type())),
+        arr_size,
+        uint_type());
+
+      // 1. get size
+      /** convert it to:
+      constant
+        * type: unsignedbv
+            * width: 64
+        * value: 0000000000000000000000000000000000000000000000000000000000000100
+        * #cformat: 4
+        * #c_sizeof_type: signedbv
+            * width: 32
+            * #cpp_type: signed_int
+      constant
+        * type: unsignedbv
+            * width: 64
+        * value: 0000000000000000000000000000000000000000000000000000000000001000
+        * #cformat: 8
+        * #c_sizeof_type: symbol
+            * identifier: tag-Test
+      **/
+      exprt size_of_expr = exprt("sizeof", size_expr.type());
+      typet elem_type = t.subtype();
+
+      if (elem_type.is_struct())
+      {
+        struct_union_typet t = to_struct_union_type(elem_type);
+        elem_type = symbol_typet(prefix + t.tag().as_string());
+      }
+      size_of_expr.set("#c_sizeof_type", elem_type);
+
+      // 2 populate arguments for calloc call
+      calc_call.arguments().push_back(size_expr);
+      calc_call.arguments().push_back(size_of_expr);
+
+      // 3. assign it as the initial value
+      added_symbol.value = calc_call;
+      decl.operands().push_back(calc_call);
+      // 3.1 move to the initializers
+      if (is_state_var && !is_inherited && !has_init)
+      {
+        initializers.push_back(&added_symbol);
+      }
+
+      // 4. populate init value if there is any
+      if (has_init)
+      {
+        // An auxiliary state var (i.e. tmpN) will be created during the `convert_type_expr()`
+        // val: symbol_expr __ESBMC_ARRAY_tmpN
+        exprt arg1;
+        if (get_init_expr(ast_node, t, arg1))
+          return true;
+
+        // 4. populate arguments for memcpy call
+        exprt arg0;
+        if (is_state_var && current_functionDecl != nullptr)
+        {
+          // convert zz to this->zz
+          if (get_var_decl_ref(ast_node, arg0))
+            return true;
+        }
+        else
+          arg0 = symbol_expr(added_symbol);
+
+        exprt arg2 = exprt("*", long_uint_type());
+        arg2.move_to_operands(size_expr, size_of_expr);
+
+        memc_call.arguments().push_back(arg0);
+        memc_call.arguments().push_back(arg1);
+        memc_call.arguments().push_back(arg2);
+
+        // 5. move them to the initializers / current_blockDecl
+        //! order matter
+        if (is_state_var && !is_inherited)
+        {
+          // construct a dump symbol
+          symbolt dump;
+          get_default_symbol(
+            dump, debug_modulename, empty_typet(), name, id, location_begin);
+          dump.name = arg1.name().as_string() + "ARRAY_MEMCPY";
+          dump.id = arg1.identifier().as_string() + "ARRAY_MEMCPY";
+          dump.static_lifetime = false;
+          dump.type.set("#sol_type", "ARRAY_MEMCPY");
+          dump.value = memc_call;
+          symbolt &added_dump = *move_symbol_to_context(dump);
+          initializers.push_back(&added_dump);
+
+          initializers.push_back(&added_symbol);
+        }
+        else if (!is_state_var)
+        {
+          convert_expression_to_code(memc_call);
+          decl.location() = location_begin;
+          current_blockDecl.move_to_operands(decl, memc_call);
+        }
+        new_expr = code_skipt();
+      }
+      else
+      {
+        decl.location() = location_begin;
+        new_expr = decl;
+      }
+    }
+    else
+    {
+      // for dynmaic array
+      exprt val;
+      if (get_init_expr(ast_node, t, val))
+        return true;
+
+      std::string arr_size = val.get("#sol_array_size").as_string();
+      assert(!arr_size.empty());
+      exprt size_expr = constant_exprt(
+        integer2binary(string2integer(arr_size), bv_width(uint_type())),
+        arr_size,
+        uint_type());
+      exprt size_of_expr = exprt("sizeof", size_expr.type());
+      typet _size_type = t.subtype();
+    }
+
+    return false;
+  }
+
   exprt val;
   if (has_init && !is_inherited)
   {
-    nlohmann::json init_value =
-      ast_node.contains("value") ? ast_node["value"] : ast_node["initialValue"];
-    nlohmann::json literal_type = ast_node["typeDescriptions"];
-
-    assert(literal_type != nullptr);
-
-    if (get_expr(init_value, literal_type, val))
+    if (get_init_expr(ast_node, t, val))
       return true;
-
-    convert_type_expr(ns, val, t);
 
     added_symbol.value = val;
     decl.operands().push_back(val);
@@ -725,42 +893,12 @@ bool solidity_convertert::get_var_decl(
     decl.operands().push_back(val);
   }
 
-  // for array
-  if (t.get("#sol_type").as_string() == "ARRAY" && !has_init && !is_inherited)
-  {
-    // int[2] p
-    // => int* p = [0, 0];
-
-    // get elem_type
-    typet elem_type = t.subtype();
-
-    // get size
-    std::string _size = t.get("#sol_array_size").as_string();
-    assert(!_size.empty());
-    exprt size_expr = constant_exprt(
-      integer2binary(string2integer(_size), bv_width(size_type())),
-      _size,
-      size_type());
-
-    // construct array
-    typet arr_type = array_typet(elem_type, size_expr);
-    arr_type.set("#sol_type", "ARRAY");
-    arr_type.set("#sol_array_size", "0");
-    exprt val = exprt(irept::id_array, arr_type);
-
-    // construct auxiliary local var
-    convert_type_expr(ns, val, t);
-
-    added_symbol.value = val;
-    decl.operands().push_back(val);
-  }
-
   // store state variable, which will be initialized in the constructor
   // note that for the state variables that do not have initializer
   // we have already set it as zero value
   if (is_state_var && !is_inherited)
   {
-    initializers.insert(&added_symbol);
+    initializers.push_back(&added_symbol);
   }
 
   decl.location() = location_begin;
@@ -847,7 +985,7 @@ bool solidity_convertert::get_struct_class(const nlohmann::json &struct_def)
 
     log_debug(
       "solidity",
-      "\t@@@get ContractBodyElementT = {}",
+      "@@@ got ContractBodyElementT = {}",
       SolidityGrammar::contract_body_element_to_str(type));
 
     switch (type)
@@ -966,7 +1104,7 @@ bool solidity_convertert::get_struct_class_method(
     return true;
 
   // set virtual / override
-  if (ast_node["virtual"] == true)
+  if (ast_node.contains("virtual") && ast_node["virtual"] == true)
     comp.set("#is_sol_virtual", true);
   else if (ast_node.contains("overrides"))
     comp.set("#is_sol_override", true);
@@ -1354,12 +1492,16 @@ void solidity_convertert::get_temporary_object(exprt &call, exprt &new_expr)
   new_expr = call;
 }
 
-// convert the initializaiton of the state variable
+// convert the initialization of the state variable
 // into the equivalent assignmment in the ctor
 bool solidity_convertert::move_initializer_to_ctor(
   const std::string contract_name,
   std::string ctor_id)
 {
+  log_debug(
+    "solidity",
+    "@@@ Moving initialization of the state variable to the constructor");
+
   if (ctor_id.empty())
   {
     if (get_ctor_call_id(contract_name, ctor_id))
@@ -1378,21 +1520,41 @@ bool solidity_convertert::move_initializer_to_ctor(
   {
     log_debug(
       "solidity",
-      "@@@ initializing symbol {} in the constructor",
+      "\t@@@ initializing symbol {} in the constructor",
       i->name.as_string());
     assert(i->value.id() != "nil");
-    exprt comp = symbol_expr(*i);
-    exprt lhs = member_exprt(base, comp.name(), comp.type());
-    exprt rhs = i->value;
-    exprt _assign = side_effect_exprt("assign", comp.type());
-    _assign.location() = sym.location;
 
-    convert_type_expr(ns, rhs, comp.type());
-    _assign.copy_to_operands(lhs, rhs);
+    if (i->type.id() == typet::id_empty)
+    {
+      // auxilary
+      assert(!i->type.get("#sol_type").empty());
+      if (i->type.get("#sol_type").as_string() == "ARRAY_MEMCPY")
+      {
+        exprt memc = i->value;
+        // memcpy(copy, origin, sizeof() * N);
+        // since we are handling state var, we need to add the this ptr
+        // i.e. memcpy(this->copy, origin, sizeof() * N);
+        exprt &arg0 = to_side_effect_expr_function_call(memc).arguments().at(0);
+        arg0 = member_exprt(base, arg0.name(), arg0.type());
+        convert_expression_to_code(memc);
+        sym.value.operands().insert(sym.value.operands().begin(), memc);
+      }
+    }
+    else
+    {
+      exprt comp = symbol_expr(*i);
+      exprt lhs = member_exprt(base, comp.name(), comp.type());
+      exprt rhs = i->value;
+      exprt _assign = side_effect_exprt("assign", comp.type());
+      _assign.location() = sym.location;
 
-    convert_expression_to_code(_assign);
-    // insert before the sym.value.operands
-    sym.value.operands().insert(sym.value.operands().begin(), _assign);
+      convert_type_expr(ns, rhs, comp.type());
+      _assign.copy_to_operands(lhs, rhs);
+
+      convert_expression_to_code(_assign);
+      // insert before the sym.value.operands
+      sym.value.operands().insert(sym.value.operands().begin(), _assign);
+    }
   }
 
   // insert parent ctor call in the front
@@ -1407,6 +1569,10 @@ bool solidity_convertert::move_inheritance_to_ctor(
   std::string ctor_id,
   symbolt &sym)
 {
+  log_debug(
+    "solidity",
+    "@@@ Moving parents' constructor calls to the current constructor");
+
   std::string this_id = ctor_id + "#this";
   exprt this_expr = symbol_expr(*context.find_symbol(this_id));
 
@@ -3408,6 +3574,26 @@ bool solidity_convertert::get_expr(
   return false;
 }
 
+// get the initial value for the variable declaration
+bool solidity_convertert::get_init_expr(
+  const nlohmann::json &ast_node,
+  const typet &dest_type,
+  exprt &new_expr)
+{
+  nlohmann::json init_value =
+    ast_node.contains("value") ? ast_node["value"] : ast_node["initialValue"];
+  nlohmann::json literal_type = ast_node["typeDescriptions"];
+
+  if (literal_type == nullptr)
+    return true;
+
+  if (get_expr(init_value, literal_type, new_expr))
+    return true;
+
+  convert_type_expr(ns, new_expr, dest_type);
+  return false;
+}
+
 // get the contract name that contains the ast_node
 // note that the contract_name might be empty
 bool solidity_convertert::get_current_contract_name(
@@ -4522,28 +4708,38 @@ bool solidity_convertert::get_type_description(
   // For Solidity rule type-name:
   SolidityGrammar::TypeNameT type = SolidityGrammar::get_type_name_t(type_name);
 
+  std::string typeIdentifier;
+  std::string typeString;
+
+  if (type_name.contains("typeIdentifier"))
+    typeIdentifier = type_name["typeIdentifier"].get<std::string>();
+  if (type_name.contains("typeString"))
+    typeString = type_name["typeString"].get<std::string>();
+
   switch (type)
   {
   case SolidityGrammar::TypeNameT::ElementaryTypeName:
   {
     // rule state-variable-declaration
-    return get_elementary_type_name(type_name, new_type);
+    if (get_elementary_type_name(type_name, new_type))
+      return true;
+    break;
   }
   case SolidityGrammar::TypeNameT::ParameterList:
   {
     // rule parameter-list
     // Used for Solidity function parameter or return list
-    return get_parameter_list(type_name, new_type);
+    if (get_parameter_list(type_name, new_type))
+      return true;
+    break;
   }
   case SolidityGrammar::TypeNameT::Pointer:
   {
     // auxiliary type: pointer (FuncToPtr decay)
     // This part is for FunctionToPointer decay only
     assert(
-      type_name["typeString"].get<std::string>().find("function") !=
-        std::string::npos ||
-      type_name["typeString"].get<std::string>().find("contract") !=
-        std::string::npos);
+      typeString.find("function") != std::string::npos ||
+      typeString.find("contract") != std::string::npos);
 
     // Since Solidity does not have this, first make a pointee
     nlohmann::json pointee = make_pointee_type(type_name);
@@ -4561,9 +4757,7 @@ bool solidity_convertert::get_type_description(
   {
     // auxiliary type: pointer (FuncToPtr decay)
     // This part is for FunctionToPointer decay only
-    assert(
-      type_name["typeIdentifier"].get<std::string>().find("ArrayToPtr") !=
-      std::string::npos);
+    assert(typeIdentifier.find("ArrayToPtr") != std::string::npos);
 
     // Array type descriptor is like:
     //  "typeIdentifier": "ArrayToPtr",
@@ -4647,12 +4841,12 @@ bool solidity_convertert::get_type_description(
 
       // 1. rebuild baseType
       nlohmann::json new_json;
-      std::string temp = type_name["typeString"].get<std::string>();
+      std::string temp = typeString;
       auto pos = temp.find("[]"); // e.g. "uint256[] memory"
-      const std::string typeString = temp.substr(0, pos);
-      const std::string typeIdentifier = "t_" + typeString;
-      new_json["typeString"] = typeString;
-      new_json["typeIdentifier"] = typeIdentifier;
+      const std::string new_typeString = temp.substr(0, pos);
+      const std::string new_typeIdentifier = "t_" + new_typeString;
+      new_json["typeString"] = new_typeString;
+      new_json["typeIdentifier"] = new_typeIdentifier;
 
       // 2. get subType
       typet sub_type;
@@ -4670,7 +4864,7 @@ bool solidity_convertert::get_type_description(
   {
     // e.g. ContractName tmp = new ContractName(Args);
 
-    std::string constructor_name = type_name["typeString"].get<std::string>();
+    std::string constructor_name = typeString;
     size_t pos = constructor_name.find(" ");
     std::string id = prefix + constructor_name.substr(pos + 1);
 
@@ -4701,20 +4895,19 @@ bool solidity_convertert::get_type_description(
     //             }
 
     nlohmann::json new_json;
-    std::string typeIdentifier = type_name["typeIdentifier"].get<std::string>();
-    std::string typeString = type_name["typeString"].get<std::string>();
 
     // convert it back to ElementaryTypeName by removing the "type" prefix
     std::size_t begin = typeIdentifier.find("$_");
     std::size_t end = typeIdentifier.rfind("_$");
-    typeIdentifier = typeIdentifier.substr(begin + 2, end - begin - 2);
+    std::string new_typeIdentifier =
+      typeIdentifier.substr(begin + 2, end - begin - 2);
 
     begin = typeString.find("type(");
     end = typeString.rfind(")");
-    typeString = typeString.substr(begin + 5, end - begin - 5);
+    std::string new_typeString = typeString.substr(begin + 5, end - begin - 5);
 
-    new_json["typeIdentifier"] = typeIdentifier;
-    new_json["typeString"] = typeString;
+    new_json["typeIdentifier"] = new_typeIdentifier;
+    new_json["typeString"] = new_typeString;
 
     get_elementary_type_name(new_json, new_type);
 
@@ -4735,23 +4928,23 @@ bool solidity_convertert::get_type_description(
     // }
 
     // extract id and ref_id;
-    std::string typeString = type_name["typeString"].get<std::string>();
     std::string delimiter = " ";
 
     int cnt = 1;
     std::string token;
+    std::string _typeString = typeString;
 
     // extract the seconde string
     while (cnt >= 0)
     {
-      if (typeString.find(delimiter) == std::string::npos)
+      if (_typeString.find(delimiter) == std::string::npos)
       {
-        token = typeString;
+        token = _typeString;
         break;
       }
-      size_t pos = typeString.find(delimiter);
-      token = typeString.substr(0, pos);
-      typeString.erase(0, pos + delimiter.length());
+      size_t pos = _typeString.find(delimiter);
+      token = _typeString.substr(0, pos);
+      _typeString.erase(0, pos + delimiter.length());
       cnt--;
     }
 
@@ -4761,15 +4954,14 @@ bool solidity_convertert::get_type_description(
     {
       // if struct is not parsed, handle the struct first
       // extract the decl ref id
-      std::string typeIdentifier =
-        type_name["typeIdentifier"].get<std::string>();
-      typeIdentifier.replace(
-        typeIdentifier.find("t_struct$_"), sizeof("t_struct$_") - 1, "");
+      std::string new_typeIdentifier = typeIdentifier;
+      new_typeIdentifier.replace(
+        new_typeIdentifier.find("t_struct$_"), sizeof("t_struct$_") - 1, "");
 
-      auto pos_1 = typeIdentifier.find("$");
-      auto pos_2 = typeIdentifier.find("_storage");
+      auto pos_1 = new_typeIdentifier.find("$");
+      auto pos_2 = new_typeIdentifier.find("_storage");
 
-      const int ref_id = stoi(typeIdentifier.substr(pos_1 + 1, pos_2));
+      const int ref_id = stoi(new_typeIdentifier.substr(pos_1 + 1, pos_2));
       const nlohmann::json struct_base = find_decl_ref(ref_id);
 
       if (get_struct_class(struct_base))
@@ -4812,6 +5004,14 @@ bool solidity_convertert::get_type_description(
   //    - Volatile
   //    - isRestrict
 
+  // set data location
+  if (typeIdentifier.find("_memory_ptr") != std::string::npos)
+    new_type.set("#sol_data_loc", "memory");
+  else if (typeIdentifier.find("_storage_ptr") != std::string::npos)
+    new_type.set("#sol_data_loc", "storage");
+  else if (typeIdentifier.find("_calldata_ptr") != std::string::npos)
+    new_type.set("#sol_data_loc", "calldata");
+
   return false;
 }
 
@@ -4826,6 +5026,11 @@ bool solidity_convertert::get_func_decl_ref_type(
   // Similar to the function get_type_description()
   SolidityGrammar::FunctionDeclRefT type =
     SolidityGrammar::get_func_decl_ref_t(decl);
+
+  log_debug(
+    "solidity",
+    "\t@@@ got SolidityGrammar::FunctionDeclRefT = {}",
+    SolidityGrammar::func_decl_ref_to_str(type));
 
   switch (type)
   {
@@ -5297,8 +5502,7 @@ bool solidity_convertert::get_mapping_key_expr(
   to_struct_type(struct_sym.type).components().push_back(comp);
 
   // move it to the initialize list
-  assert(initializers.count(&added_sym) == 0);
-  initializers.insert(&added_sym);
+  initializers.push_back(&added_sym);
 
   return false;
 }
@@ -6965,8 +7169,13 @@ void solidity_convertert::convert_type_expr(
         }
         if (z_dest_size > s_size)
         {
+          for (unsigned i = 0; i < s_size; i++)
+          {
+            exprt &op = src_expr.operands().at(i);
+            solidity_gen_typecast(ns, op, dest_type.subtype());
+          }
           exprt _zero =
-            gen_zero(get_complete_type(src_type.subtype(), ns), true);
+            gen_zero(get_complete_type(dest_type.subtype(), ns), true);
           _zero.location() = src_expr.location();
           _zero.set("#cformat", 0);
           // push zero
@@ -6997,7 +7206,7 @@ void solidity_convertert::convert_type_expr(
         symbolt sym;
         get_default_symbol(
           sym, debug_modulename, src_expr.type(), aux_name, aux_id, loc);
-        sym.static_lifetime = false;
+        sym.static_lifetime = true;
         sym.is_extern = false;
         sym.lvalue = false;
 
