@@ -5724,6 +5724,7 @@ bool solidity_convertert::get_elementary_type_name(
   }
   case SolidityGrammar::ElementaryTypeNameT::STRING:
   {
+    /* ESBMC v7.6.1 can't construct rvalue reference to array type during dereference
     size_t value_length = 128;
 
     new_type = array_typet(
@@ -5732,6 +5733,9 @@ bool solidity_convertert::get_elementary_type_name(
         integer2binary(value_length, bv_width(int_type())),
         integer2string(value_length),
         int_type()));
+    */
+    new_type = char_type();
+    new_type = pointer_typet(new_type);
     new_type.set("#sol_type", "STRING");
     break;
   }
