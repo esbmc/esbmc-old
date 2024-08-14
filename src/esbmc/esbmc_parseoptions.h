@@ -103,6 +103,9 @@ private:
 
 public:
   goto_functionst goto_functions;
+
+  // for multi-kind/incr
+  std::set<std::pair<std::string, std::string>> to_remove_claims;
 };
 
 #endif

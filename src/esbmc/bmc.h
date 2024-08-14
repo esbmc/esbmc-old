@@ -16,6 +16,11 @@
 class bmct
 {
 public:
+  bmct(
+    goto_functionst &funcs,
+    optionst &opts,
+    contextt &_context,
+    std::set<std::pair<std::string, std::string>> &_claims);
   bmct(goto_functionst &funcs, optionst &opts, contextt &_context);
 
   optionst &options;
@@ -38,6 +43,9 @@ public:
 protected:
   const contextt &context;
   namespacet ns;
+  // for multi-kind/incr
+  std::set<std::pair<std::string, std::string>> &to_remove_claims;
+  std::set<std::pair<std::string, std::string>> dump = {};
 
   std::unique_ptr<smt_convt> runtime_solver;
   std::unique_ptr<reachability_treet> symex;

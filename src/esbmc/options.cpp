@@ -203,7 +203,8 @@ const struct group_opt_templ all_cmd_options[] = {
     {"no-slice", NULL, "do not remove unused equations"},
     {"multi-fail-fast",
      boost::program_options::value<int>()->value_name("n"),
-     "stops after first n VCC violation found in multi property mode"},
+     "stops after first n VCC violation found in multi property mode."
+     "(not compatible with incremental bmc strategies)"},
     {"no-slice-name",
      boost::program_options::value<std::vector<std::string>>()->value_name(
        "name"),

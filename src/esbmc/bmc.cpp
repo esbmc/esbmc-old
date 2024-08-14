@@ -42,8 +42,18 @@
 #include <atomic>
 #include <goto-symex/witnesses.h>
 
+// constructor delegation
 bmct::bmct(goto_functionst &funcs, optionst &opts, contextt &_context)
-  : options(opts), context(_context), ns(context)
+  : bmct(funcs, opts, _context, dump)
+{
+}
+
+bmct::bmct(
+  goto_functionst &funcs,
+  optionst &opts,
+  contextt &_context,
+  std::set<std::pair<std::string, std::string>> &_claims)
+  : options(opts), context(_context), ns(context), to_remove_claims(_claims)
 {
   interleaving_number = 0;
   interleaving_failed = 0;
@@ -796,6 +806,8 @@ smt_convt::resultt bmct::multi_property_check(
                      options.get_bool_option("condition-coverage-rm") ||
                      options.get_bool_option("condition-coverage-claims-rm");
   bool is_keep_verified = options.get_bool_option("keep-verified-claims");
+
+  // For multi-kind/ multi-incr
   bool is_clear_verified = (options.get_bool_option("k-induction") ||
                             options.get_bool_option("incremental-bmc") ||
                             options.get_bool_option("k-induction-parallel")) &&
@@ -853,6 +865,16 @@ smt_convt::resultt bmct::multi_property_check(
     claim_slicer claim(i, false, is_goto_cov, ns);
     claim.run(local_eq.SSA_steps);
 
+    // for the manually added assertions during the symex, i.e. derefence_failure
+    if (is_clear_verified && !to_remove_claims.empty())
+    {
+      auto claim_pair = std::make_pair(claim.claim_msg, claim.claim_loc);
+      if (to_remove_claims.count(claim_pair))
+      {
+        return; // smt_convt::P_UNSATISFIABLE
+      }
+    }
+
     // Drop claims that verified to be failed
     // we use the "comment + location" to distinguish each claim
     // to avoid double verifying the claims that are already verified
@@ -871,8 +893,11 @@ smt_convt::resultt bmct::multi_property_check(
       return;
 
     // Slice
-    symex_slicet slicer(options);
-    slicer.run(local_eq.SSA_steps);
+    if (!options.get_bool_option("no-slice"))
+    {
+      symex_slicet slicer(options);
+      slicer.run(local_eq.SSA_steps);
+    }
 
     if (options.get_bool_option("ssa-features-dump"))
     {
@@ -917,38 +942,61 @@ smt_convt::resultt bmct::multi_property_check(
         std::ofstream out(fmt::format("{}-{}", ce_counter++, output_file));
         show_goto_trace(out, ns, goto_trace);
       }
-      std::ostringstream oss;
-      log_fail("\n[Counterexample]\n");
-      show_goto_trace(oss, ns, goto_trace);
-      log_result("{}", oss.str());
+      if (options.get_bool_option("result-only"))
+      {
+        std::ostringstream oss;
+        log_fail("\n[Counterexample]\n");
+        show_goto_trace(oss, ns, goto_trace);
+        log_result("{}", oss.str());
+      }
       final_result = result;
 
       // Update fail-fast-counter
       fail_fast_cnt++;
 
       // for kind && incr: remove verified claims
+      // we should not remove it in each job run as it may be
+      // the same claim which claim_msg with different claim_msg due to unwinding
       if (is_clear_verified)
       {
-        for (auto &it : symex->goto_functions.function_map)
-        {
-          for (auto &instruction : it.second.body.instructions)
-          {
-            if (
-              instruction.is_assert() &&
-              from_expr(ns, "", instruction.guard) == claim.claim_msg &&
-              instruction.location.as_string() == claim.claim_loc)
-            {
-              // convert ASSERT to SKIP
-              instruction.make_skip();
-              break;
-            }
-          }
-        }
+        // make copy
+        std::string _msg = claim.claim_msg;
+        std::string _loc = claim.claim_loc;
+        to_remove_claims.insert(std::make_pair(_msg, _loc));
       }
     }
   };
 
   std::for_each(std::begin(jobs), std::end(jobs), job_function);
+
+  // remove verified claims from the Goto functions
+  if (is_clear_verified && !to_remove_claims.empty())
+  {
+    Forall_goto_functions (f_it, symex->goto_functions)
+    {
+      if (f_it->second.body_available)
+      {
+        goto_programt &goto_program = f_it->second.body;
+        std::string claim_msg, claim_loc;
+        std::pair<std::string, std::string> claim_pair;
+        Forall_goto_program_instructions (it, goto_program)
+        {
+          if (it->is_assert())
+          {
+            claim_msg = from_expr(ns, "", it->guard);
+            claim_loc = it->location.as_string();
+            claim_pair = std::make_pair(claim_msg, claim_loc);
+            if (to_remove_claims.count(claim_pair))
+            {
+              to_remove_claims.erase(claim_pair);
+              // convert assert to skip
+              it->make_skip();
+            }
+          }
+        }
+      }
+    }
+  }
 
   // For coverage
   // Assertion Coverage:
