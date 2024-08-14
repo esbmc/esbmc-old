@@ -169,6 +169,7 @@ protected:
   bool is_library_function(const std::string &id);
   bool get_empty_array_ref(const nlohmann::json &ast_node, exprt &new_expr);
   void get_aux_array_name(std::string &aux_name, std::string &aux_id);
+  void get_aux_array(const exprt &src_expr, exprt &new_expr);
 
   // tuple
   bool get_tuple_definition(const nlohmann::json &ast_node);

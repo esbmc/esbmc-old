@@ -68,7 +68,22 @@ bool solidity_convertert::convert_string_literal(
   std::string the_value,
   exprt &dest)
 {
-  size_t string_size = the_value.size();
+  /*
+  string-constant
+  * type: array
+      * size: constant
+          * type: unsignedbv
+              * width: 64
+          * value: 0000000000000000000000000000000000000000000000000000000000000101
+          * #cformat: 5
+      * subtype: signedbv
+          * width: 8
+          * #cpp_type: signed_char
+      * #sol_type: STRING_LITERAL
+  * value: 1234
+  * kind: default
+  */
+  size_t string_size = the_value.size() + 1;
   typet type = array_typet(
     signed_char_type(),
     constant_exprt(
@@ -78,7 +93,7 @@ bool solidity_convertert::convert_string_literal(
   // TODO: Handle null terminator byte
   string_constantt string(the_value, type, string_constantt::k_default);
   dest.swap(string);
-  dest.type().set("#sol_type", "STRING");
+  dest.type().set("#sol_type", "STRING_LITERAL");
 
   return false;
 }

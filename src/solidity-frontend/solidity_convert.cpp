@@ -659,7 +659,7 @@ bool solidity_convertert::get_var_decl(
      SolidityGrammar::ContractTypeName) &&
     !has_init;
 
-  if ((!has_init || is_inherited) && !is_not_init_contract_var)
+  if ((!has_init || is_inherited) && !is_not_init_contract_var && !mapping)
   {
     // for both state and non-state variables, set default value as zero
     symbol.value = gen_zero(get_complete_type(t, ns), true);
@@ -674,9 +674,8 @@ bool solidity_convertert::get_var_decl(
   code_declt decl(symbol_expr(added_symbol));
 
   // special handling for array/dynarray
-  if (
-    t.get("#sol_type").as_string() == "ARRAY" ||
-    (t.get("#sol_type").as_string() == "DYNARRAY" && has_init))
+  std::string t_sol_type = t.get("#sol_type").as_string();
+  if (t_sol_type == "ARRAY" || (t_sol_type == "DYNARRAY" && has_init))
   {
     /** 
       uint[2] z;            // uint *z = calloc(2, sizeof(uint));
@@ -730,7 +729,7 @@ bool solidity_convertert::get_var_decl(
     // memcpy arguments
     exprt arg0, arg1, arg2;
 
-    bool is_fixed_array = t.get("#sol_type").as_string() == "ARRAY";
+    bool is_fixed_array = t_sol_type == "ARRAY";
 
     // 0. get fixed array size
     std::string arr_size;
@@ -747,7 +746,7 @@ bool solidity_convertert::get_var_decl(
     }
     else
     {
-      // for dynmaic array
+      // get constant array variable
       if (get_init_expr(ast_node, t, arg1))
         return true;
 
@@ -755,6 +754,7 @@ bool solidity_convertert::get_var_decl(
       arr_size = arg1.type().get("#sol_array_size").as_string();
       if (arr_size.empty())
       {
+        assert(arg1.type().is_array());
         size_expr = to_array_type(arg1.type()).size();
         size_expr.id("constant");
       }
@@ -882,8 +882,94 @@ bool solidity_convertert::get_var_decl(
     if (get_init_expr(ast_node, t, val))
       return true;
 
-    added_symbol.value = val;
-    decl.operands().push_back(val);
+    // for string
+    // char * x = (this->)y
+    // - x = (char *)malloc(strlen(y) + 1);
+    // - strcpy(x, y)
+    if (t_sol_type == "STRING" && val.get("#sol_type") == "STRING")
+    {
+      // do strlen
+      const std::string strl_name = "strlen";
+      const std::string strl_id = "c:@F@strlen";
+      const symbolt &strl_sym = *context.find_symbol(strl_id);
+      side_effect_expr_function_callt strl_call;
+      get_library_function_call(
+        strl_name,
+        strl_id,
+        symbol_expr(strl_sym).type(),
+        location_begin,
+        strl_call);
+      strl_call.arguments().push_back(val);
+
+      exprt one_expr = constant_exprt(
+        integer2binary(1, bv_width(unsignedbv_typet(8))),
+        integer2string(1),
+        unsignedbv_typet(8));
+
+      exprt _add = exprt("+", uint_type());
+      _add.move_to_operands(strl_call, one_expr);
+
+      // do malloc
+      const std::string malc_name = "malloc";
+      const std::string malc_id = "c:@F@malloc";
+      const symbolt &malc_sym = *context.find_symbol(malc_id);
+      side_effect_expr_function_callt malc_call;
+      get_library_function_call(
+        malc_name,
+        malc_id,
+        symbol_expr(malc_sym).type(),
+        location_begin,
+        malc_call);
+      malc_call.arguments().push_back(_add);
+
+      added_symbol.value = malc_call;
+      decl.operands().push_back(malc_call);
+
+      // do strcpy
+      const std::string stry_name = "strcpy";
+      const std::string stry_id = "c:@F@strcpy";
+      const symbolt &stry_sym = *context.find_symbol(stry_id);
+      side_effect_expr_function_callt stry_call;
+      get_library_function_call(
+        stry_name,
+        stry_id,
+        symbol_expr(stry_sym).type(),
+        location_begin,
+        stry_call);
+      stry_call.arguments().push_back(symbol_expr(added_symbol));
+      stry_call.arguments().push_back(val);
+
+      if (is_state_var && !is_inherited)
+      {
+        // construct a dump symbol
+        symbolt dump;
+        get_default_symbol(
+          dump, debug_modulename, empty_typet(), name, id, location_begin);
+        dump.name = val.name().as_string() + "STRING_CPY";
+        dump.id = val.identifier().as_string() + "STRING_CPY";
+        dump.static_lifetime = false;
+        dump.type.set("#sol_type", "STRING_CPY");
+        dump.value = stry_call;
+        symbolt &added_dump = *move_symbol_to_context(dump);
+
+        initializers.push_back(&added_symbol);
+        initializers.push_back(&added_dump);
+      }
+      else if (!is_state_var)
+      {
+        // will be handled in get_block()
+        convert_expression_to_code(malc_call);
+        decl.location() = location_begin;
+        current_blockDecl.move_to_operands(decl, malc_call);
+      }
+      new_expr = code_skipt();
+      return false;
+    }
+    else
+    {
+      added_symbol.value = val;
+      decl.operands().push_back(val);
+    }
   }
   else if (is_not_init_contract_var)
   {
@@ -916,6 +1002,47 @@ bool solidity_convertert::get_var_decl(
     // 3. add constructor call to declaration operands
     added_symbol.value = val;
     decl.operands().push_back(val);
+  }
+  // special handling for mapping
+  else if (mapping)
+  {
+    // mapping(string => uint) test;
+    // => int256* x = calloc(50, sizeof(int256));
+
+    // construct calloc call
+    const std::string calc_name = "calloc";
+    const std::string calc_id = "c:@F@calloc";
+    const symbolt &calc_sym = *context.find_symbol(calc_id);
+    side_effect_expr_function_callt calc_call;
+    get_library_function_call(
+      calc_name,
+      calc_id,
+      symbol_expr(calc_sym).type(),
+      location_begin,
+      calc_call);
+
+    exprt size_expr = constant_exprt(
+      integer2binary(50, bv_width(uint_type())),
+      integer2string(50),
+      uint_type());
+
+    exprt size_of_expr = exprt("sizeof", size_expr.type());
+    typet elem_type = t.subtype();
+
+    if (elem_type.is_struct())
+    {
+      struct_union_typet st = to_struct_union_type(elem_type);
+      elem_type = symbol_typet(prefix + st.tag().as_string());
+    }
+    size_of_expr.set("#c_sizeof_type", elem_type);
+
+    // populate arguments for calloc call
+    calc_call.arguments().push_back(size_expr);
+    calc_call.arguments().push_back(size_of_expr);
+
+    // assign it as the initial value
+    added_symbol.value = calc_call;
+    decl.operands().push_back(calc_call);
   }
 
   // store state variable, which will be initialized in the constructor
@@ -1553,18 +1680,23 @@ bool solidity_convertert::move_initializer_to_ctor(
     if (i->type.id() == typet::id_empty)
     {
       // auxilary
-      assert(!i->type.get("#sol_type").empty());
-      if (i->type.get("#sol_type").as_string() == "ARRAY_MEMCPY")
+      std::string i_sol_type = i->type.get("#sol_type").as_string();
+      assert(!i_sol_type.empty());
+      if (i_sol_type == "ARRAY_MEMCPY" || i_sol_type == "STRING_CPY")
       {
         exprt memc = i->value;
+        // Array:
         // memcpy(copy, origin, sizeof() * N);
         // since we are handling state var, we need to add the this ptr
         // i.e. memcpy(this->copy, (this->)origin, sizeof() * N);
+
+        // String:
+        // strcpy(copy, origin);
         exprt &arg0 = to_side_effect_expr_function_call(memc).arguments().at(0);
         exprt &arg1 = to_side_effect_expr_function_call(memc).arguments().at(1);
 
         arg0 = member_exprt(base, arg0.name(), arg0.type());
-        if (arg1.type().get("#sol_type").as_string() == "ARRAY")
+        if (arg1.type().get_bool("#sol_state_var") == true)
           // e.g. uint[] x = y;
           arg1 = member_exprt(base, arg1.name(), arg1.type());
 
@@ -2735,7 +2867,7 @@ bool solidity_convertert::get_expr(
         if (convert_hex_literal(the_value, new_expr, byte_size * 8))
           return true;
 
-        new_expr.type().set("#sol_type", "INT_CONST");
+        new_expr.type().set("#sol_type", "BYTES_LITERAL");
         break;
       }
       case SolidityGrammar::ElementaryTypeNameT::STRING_LITERAL:
@@ -2750,7 +2882,7 @@ bool solidity_convertert::get_expr(
         if (convert_hex_literal(hex_val, new_expr, byte_size * 8))
           return true;
 
-        new_expr.type().set("#sol_type", "STRING");
+        new_expr.type().set("#sol_type", "BYTES_LITERAL");
         break;
       }
       default:
@@ -3223,8 +3355,6 @@ bool solidity_convertert::get_expr(
     {
       // this could be set or get
       // e.g. y = map[x] or map[x] = y
-      // here, we convert it to a 'get' and check if it's a 'set' in other places
-      // ==> map_get_int(&m, "1234")
 
       // find mapping definition
       assert(base_json.contains("referencedDeclaration"));
@@ -3276,7 +3406,7 @@ bool solidity_convertert::get_expr(
         return true;
 
       // typecast: convert xx => uint
-      if (sol_type == "STRING")
+      if (sol_type == "STRING" || sol_type == "STRING_LITERAL")
       {
         // convert string hex literal
         // if there is already a hexValue in the node
@@ -3970,23 +4100,55 @@ bool solidity_convertert::get_binary_operator_expr(
       current_BinOp_type.pop();
       return false;
     }
-
     else if (rt_sol == "ARRAY_LITERAL" || rt_sol == "ARRAY")
     {
+      exprt size_expr;
       if (rt_sol == "ARRAY_LITERAL")
+      {
         // construct auxiliary var
         convert_type_expr(ns, rhs, lt);
+        assert(rhs.type().is_array());
+        size_expr = to_array_type(rhs.type()).size();
+        size_expr.id("constant");
+      }
+      else
+      {
+        if (rhs.type().is_pointer())
+        {
+          // e.g.  this->x = this->y;
+          //       this->x = y
+          std::string sol_array_size =
+            rhs.type().get("#sol_array_size").as_string();
+          size_expr = constant_exprt(
+            integer2binary(
+              string2integer(sol_array_size), bv_width(uint_type())),
+            sol_array_size,
+            uint_type());
+        }
+        else if (rhs.type().is_array())
+        {
+          size_expr = to_array_type(rhs.type()).size();
+          size_expr.id("constant");
+        }
+        else
+        {
+          log_error("Unexpected rhs array type.");
+          return true;
+        }
+      }
 
       // convert assignment to memcpy
-      // int[] x / int[3] x;
-      // x = [1,2,3] =>
+      // int[3] x; x = [1,2,3]
       // - memcpy(x, tmp1, n * sizeof(int));
-      // x = y =>
+      //
+      // int[] x; x = [1,2,3];
       // x = calloc(r, sizeof(int)); // reset and resize
       // - memcpy(x, y, n * sizeof(int));
-      assert(rhs.type().is_array());
-      exprt size_expr = to_array_type(rhs.type()).size();
-      size_expr.id("constant");
+      //
+      // x = y
+      // x = calloc(r, sizeof(int)); // reset and resize
+      // - memcpy(x, y, n * sizeof(int));
+
       exprt size_of_expr = exprt("sizeof", size_expr.type());
       typet elem_type = t.subtype();
       if (elem_type.is_struct())
@@ -3997,9 +4159,10 @@ bool solidity_convertert::get_binary_operator_expr(
       size_of_expr.set("#c_sizeof_type", elem_type);
 
       exprt _assign;
-      if (rt_sol == "ARRAY")
+      if (rt_sol == "ARRAY" || lt_sol == "DYNARRAY")
       {
         // construct calloc
+        // theoretically, dyn array should use malloc
         const std::string calc_name = "calloc";
         const std::string calc_id = "c:@F@calloc";
         const symbolt &calc_sym = *context.find_symbol(calc_id);
@@ -4038,7 +4201,7 @@ bool solidity_convertert::get_binary_operator_expr(
       memc_call.arguments().push_back(rhs);
       memc_call.arguments().push_back(arg2);
 
-      if (rt_sol == "ARRAY")
+      if (rt_sol == "ARRAY" || lt_sol == "DYNARRAY")
       {
         current_blockDecl.move_to_operands(_assign, memc_call);
         new_expr = code_skipt();
@@ -4051,6 +4214,25 @@ bool solidity_convertert::get_binary_operator_expr(
     {
       log_error("Dynamic array assignment is currently unsupported.");
       return true;
+    }
+    else if (lt_sol == "STRING" && rt_sol == "STRING")
+    {
+      // x = y ==> strcpy(x,y)
+      const std::string stry_name = "strcpy";
+      const std::string stry_id = "c:@F@strcpy";
+      const symbolt &stry_sym = *context.find_symbol(stry_id);
+      side_effect_expr_function_callt stry_call;
+      get_library_function_call(
+        stry_name,
+        stry_id,
+        symbol_expr(stry_sym).type(),
+        lhs.location(),
+        stry_call);
+      stry_call.arguments().push_back(lhs);
+      stry_call.arguments().push_back(rhs);
+
+      new_expr = stry_call;
+      return false;
     }
 
     new_expr = side_effect_exprt("assign", t);
@@ -5526,7 +5708,7 @@ bool solidity_convertert::get_mapping_type(
   {
     // TODO: FIXME! We treat string as uint256
     elem_type = unsignedbv_typet(256);
-    elem_type.set("#sol_type", "STRING");
+    elem_type.set("#sol_type", "STRING_UINT");
   }
 
   //TODO set as infinite array. E.g.
@@ -5541,13 +5723,15 @@ bool solidity_convertert::get_mapping_type(
 
   // For now, we set it as a relatively large array
   // if the value_length is too large, the efficiency will be affected.
-  BigInt value_length = 50;
-  t = array_typet(
-    elem_type,
-    constant_exprt(
-      integer2binary(value_length, bv_width(unsignedbv_typet(8))),
-      integer2string(value_length),
-      unsignedbv_typet(8)));
+  // BigInt value_length = 50;
+  // t = array_typet(
+  //   elem_type,
+  //   constant_exprt(
+  //     integer2binary(value_length, bv_width(unsignedbv_typet(8))),
+  //     integer2string(value_length),
+  //     unsignedbv_typet(8)));
+
+  t = pointer_typet(elem_type);
   // ? MAPPING_INSTANCE?
   t.set("#sol_type", "MAPPING");
 
@@ -7225,7 +7409,8 @@ void solidity_convertert::convert_type_expr(
       src_expr = bswap_expr;
     }
     else if (
-      src_sol_type == "ARRAY_LITERAL" && src_type.id() == typet::id_array)
+      (src_sol_type == "ARRAY_LITERAL" || src_sol_type == "STRING_LITERAL") &&
+      src_type.id() == typet::id_array)
     {
       // this means we are handling a src constant array
       // which should be assigned to an array pointer
@@ -7255,7 +7440,7 @@ void solidity_convertert::convert_type_expr(
 
       // get lhs array size
       std::string dest_size;
-      if (dest_sol_type == "ARRAY")
+      if (dest_sol_type == "ARRAY" || dest_sol_type == "STRING")
       {
         dest_size = dest_type.get("#sol_array_size").as_string();
         assert(!dest_size.empty());
@@ -7330,34 +7515,21 @@ void solidity_convertert::convert_type_expr(
             src_expr.operands().push_back(_zero);
 
           // reset size
+          assert(src_expr.type().is_array());
           to_array_type(src_expr.type()).size() = dest_array_size;
         }
-
-        // since it's a constant array, we could safely make it to a local var
-        // this local var will not be referred again so the name could be random.
-        // e.g.
-        // int[3] p = [1,2];
-        // => int *p = [1,2,3];
-        // => static int[3] tmp1 = [1,2,3];
-        // return: src_expr = symbol_expr(tmp1)
-        std::string aux_name;
-        std::string aux_id;
-        get_aux_array_name(aux_name, aux_id);
-
-        locationt loc = src_expr.location();
-        std::string debug_modulename = "C++";
-        symbolt sym;
-        get_default_symbol(
-          sym, debug_modulename, src_expr.type(), aux_name, aux_id, loc);
-        sym.static_lifetime = true;
-        sym.is_extern = false;
-        sym.lvalue = false;
-
-        symbolt &added_symbol = *move_symbol_to_context(sym);
-
-        added_symbol.value = src_expr;
-        src_expr = symbol_expr(added_symbol);
       }
+
+      // since it's a array-constant/string-constant, we could safely make it to a local var
+      // this local var will not be referred again so the name could be random.
+      // e.g.
+      // int[3] p = [1,2];
+      // => int *p = [1,2,3];
+      // => static int[3] tmp1 = [1,2,3];
+      // return: src_expr = symbol_expr(tmp1)
+      exprt new_expr;
+      get_aux_array(src_expr, new_expr);
+      src_expr = new_expr;
     }
     else
       solidity_gen_typecast(ns, src_expr, dest_type);
@@ -7370,13 +7542,13 @@ static inline void static_lifetime_init(const contextt &context, codet &dest)
 
   // call designated "initialization" functions
   context.foreach_operand_in_order([&dest](const symbolt &s) {
-    if (s.type.initialization() && s.type.is_code())
-    {
-      code_function_callt function_call;
-      function_call.function() = symbol_expr(s);
-      dest.move_to_operands(function_call);
-    }
-  });
+      if (s.type.initialization() && s.type.is_code())
+      {
+        code_function_callt function_call;
+        function_call.function() = symbol_expr(s);
+        dest.move_to_operands(function_call);
+      }
+    });
 }
 
 void solidity_convertert::get_aux_array_name(
@@ -7389,6 +7561,27 @@ void solidity_convertert::get_aux_array_name(
     aux_id = "sol:@" + aux_name;
     ++aux_counter;
   } while (context.find_symbol(aux_id) != nullptr);
+}
+
+void solidity_convertert::get_aux_array(const exprt &src_expr, exprt &new_expr)
+{
+  std::string aux_name;
+  std::string aux_id;
+  get_aux_array_name(aux_name, aux_id);
+
+  locationt loc = src_expr.location();
+  std::string debug_modulename = "C++";
+  symbolt sym;
+  get_default_symbol(
+    sym, debug_modulename, src_expr.type(), aux_name, aux_id, loc);
+  sym.static_lifetime = true;
+  sym.is_extern = false;
+  sym.lvalue = false;
+
+  symbolt &added_symbol = *move_symbol_to_context(sym);
+
+  added_symbol.value = src_expr;
+  new_expr = symbol_expr(added_symbol);
 }
 
 // declare an empty array symbol and move it to the context
@@ -7425,6 +7618,8 @@ bool solidity_convertert::get_empty_array_ref(
   const nlohmann::json literal_type = callee_arg_json["typeDescriptions"];
   if (get_expr(callee_arg_json, literal_type, size))
     return true;
+  // ?fix: it seems if this is uint256 we will get internal width-assertion fails
+  solidity_gen_typecast(ns, size, uint_type());
 
   // 3. declare array
   typet arr_type = array_typet(elem_type, size);

@@ -17,6 +17,7 @@ const std::string sol_header = R"(
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+#include <assert.h>
 )";
 
 /*
@@ -173,6 +174,9 @@ int findKeyU(struct NodeU *head, uint256_t key)
     current = current->next;
   }
   insertAtEndU(&head, key);
+  // temporary
+  if (cnt >= 50)
+    assert(0);
   return cnt;
 }
 
@@ -188,6 +192,9 @@ int findKeyI(struct NodeI *head, int256_t key)
     current = current->next;
   }
   insertAtEndI(&head, key);
+  // temporary
+  if (cnt >= 50)
+    assert(0);
   return cnt;
 }
 )";
