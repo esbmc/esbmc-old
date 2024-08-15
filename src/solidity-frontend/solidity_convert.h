@@ -237,6 +237,7 @@ protected:
   nlohmann::json make_array_elementary_type(const nlohmann::json &type_descrpt);
   nlohmann::json make_array_to_pointer_type(const nlohmann::json &type_descrpt);
   std::string get_array_size(const nlohmann::json &type_descrpt);
+  void get_size_of_expr(const typet &elem_type, exprt &size_of_expr);
   bool is_dyn_array(const nlohmann::json &json_in);
   nlohmann::json add_dyn_array_size_expr(
     const nlohmann::json &type_descriptor,

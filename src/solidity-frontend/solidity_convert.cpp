@@ -754,9 +754,28 @@ bool solidity_convertert::get_var_decl(
       arr_size = arg1.type().get("#sol_array_size").as_string();
       if (arr_size.empty())
       {
-        assert(arg1.type().is_array());
-        size_expr = to_array_type(arg1.type()).size();
-        size_expr.id("constant");
+        if (arg1.type().is_array())
+        {
+          exprt &at = to_array_type(arg1.type()).size();
+          if (!at.has_operands())
+          {
+            // constant length
+            size_expr = at;
+            size_expr.id("constant");
+          }
+          else
+          {
+            // symbol length: array[len]
+            size_expr = at.op0();
+            // ?cannot use uint256, not sure why
+            solidity_gen_typecast(ns, size_expr, uint_type());
+          }
+        }
+        else
+        {
+          log_error("Unexpected array size, got \n {}", arg1.to_string());
+          return true;
+        }
       }
       else
         size_expr = constant_exprt(
@@ -784,15 +803,9 @@ bool solidity_convertert::get_var_decl(
         * #c_sizeof_type: symbol
             * identifier: tag-Test
     **/
-    exprt size_of_expr = exprt("sizeof", size_expr.type());
-    typet elem_type = t.subtype();
 
-    if (elem_type.is_struct())
-    {
-      struct_union_typet t = to_struct_union_type(elem_type);
-      elem_type = symbol_typet(prefix + t.tag().as_string());
-    }
-    size_of_expr.set("#c_sizeof_type", elem_type);
+    exprt size_of_expr;
+    get_size_of_expr(t.subtype(), size_of_expr);
 
     // 2. populate arguments for calloc call
     calc_call.arguments().push_back(size_expr);
@@ -1026,15 +1039,8 @@ bool solidity_convertert::get_var_decl(
       integer2string(50),
       uint_type());
 
-    exprt size_of_expr = exprt("sizeof", size_expr.type());
-    typet elem_type = t.subtype();
-
-    if (elem_type.is_struct())
-    {
-      struct_union_typet st = to_struct_union_type(elem_type);
-      elem_type = symbol_typet(prefix + st.tag().as_string());
-    }
-    size_of_expr.set("#c_sizeof_type", elem_type);
+    exprt size_of_expr;
+    get_size_of_expr(t.subtype(), size_of_expr);
 
     // populate arguments for calloc call
     calc_call.arguments().push_back(size_expr);
@@ -4110,6 +4116,7 @@ bool solidity_convertert::get_binary_operator_expr(
         assert(rhs.type().is_array());
         size_expr = to_array_type(rhs.type()).size();
         size_expr.id("constant");
+        solidity_gen_typecast(ns, size_expr, uint_type());
       }
       else
       {
@@ -4149,14 +4156,8 @@ bool solidity_convertert::get_binary_operator_expr(
       // x = calloc(r, sizeof(int)); // reset and resize
       // - memcpy(x, y, n * sizeof(int));
 
-      exprt size_of_expr = exprt("sizeof", size_expr.type());
-      typet elem_type = t.subtype();
-      if (elem_type.is_struct())
-      {
-        struct_union_typet st = to_struct_union_type(elem_type);
-        elem_type = symbol_typet(prefix + st.tag().as_string());
-      }
-      size_of_expr.set("#c_sizeof_type", elem_type);
+      exprt size_of_expr;
+      get_size_of_expr(t.subtype(), size_of_expr);
 
       exprt _assign;
       if (rt_sol == "ARRAY" || lt_sol == "DYNARRAY")
@@ -7064,6 +7065,18 @@ bool solidity_convertert::is_dyn_array(const nlohmann::json &ast_node)
   return false;
 }
 
+void solidity_convertert::get_size_of_expr(const typet &t, exprt &size_of_expr)
+{
+  size_of_expr = exprt("sizeof", size_type());
+  typet elem_type = t;
+  if (elem_type.is_struct())
+  {
+    struct_union_typet st = to_struct_union_type(elem_type);
+    elem_type = symbol_typet(prefix + st.tag().as_string());
+  }
+  size_of_expr.set("#c_sizeof_type", elem_type);
+}
+
 // check if the node is a mapping
 bool solidity_convertert::is_mapping(const nlohmann::json &ast_node)
 {
@@ -7409,8 +7422,7 @@ void solidity_convertert::convert_type_expr(
       src_expr = bswap_expr;
     }
     else if (
-      (src_sol_type == "ARRAY_LITERAL" || src_sol_type == "STRING_LITERAL") &&
-      src_type.id() == typet::id_array)
+      (src_sol_type == "ARRAY_LITERAL") && src_type.id() == typet::id_array)
     {
       // this means we are handling a src constant array
       // which should be assigned to an array pointer
@@ -7440,7 +7452,7 @@ void solidity_convertert::convert_type_expr(
 
       // get lhs array size
       std::string dest_size;
-      if (dest_sol_type == "ARRAY" || dest_sol_type == "STRING")
+      if (dest_sol_type == "ARRAY")
       {
         dest_size = dest_type.get("#sol_array_size").as_string();
         assert(!dest_size.empty());
@@ -7557,7 +7569,7 @@ void solidity_convertert::get_aux_array_name(
 {
   do
   {
-    aux_name = "__ESBMC_tmp_array" + std::to_string(aux_counter);
+    aux_name = "__ESBMC_aux_array" + std::to_string(aux_counter);
     aux_id = "sol:@" + aux_name;
     ++aux_counter;
   } while (context.find_symbol(aux_id) != nullptr);
@@ -7565,6 +7577,13 @@ void solidity_convertert::get_aux_array_name(
 
 void solidity_convertert::get_aux_array(const exprt &src_expr, exprt &new_expr)
 {
+  if (
+    src_expr.name().as_string().find("__ESBMC_aux_array") != std::string::npos)
+  {
+    // skip if it's already a aux array
+    new_expr = src_expr;
+    return;
+  }
   std::string aux_name;
   std::string aux_id;
   get_aux_array_name(aux_name, aux_id);
@@ -7618,13 +7637,15 @@ bool solidity_convertert::get_empty_array_ref(
   const nlohmann::json literal_type = callee_arg_json["typeDescriptions"];
   if (get_expr(callee_arg_json, literal_type, size))
     return true;
-  // ?fix: it seems if this is uint256 we will get internal width-assertion fails
-  solidity_gen_typecast(ns, size, uint_type());
+  if (size.cformat().empty())
+    // ?fix: it seems if this is uint256 we will get internal width-assertion fails
+    solidity_gen_typecast(ns, size, uint_type());
 
   // 3. declare array
   typet arr_type = array_typet(elem_type, size);
   arr_type.set("#sol_type", "ARRAY_LITERAL");
-  arr_type.set("#sol_array_size", size.cformat().as_string());
+  if (!size.cformat().empty())
+    arr_type.set("#sol_array_size", size.cformat().as_string());
 
   // Get Symbol
   symbolt symbol;
@@ -7645,6 +7666,26 @@ bool solidity_convertert::get_empty_array_ref(
   {
     added_symbol.value = gen_zero(arr_type);
     added_symbol.value.zero_initializer(true);
+  }
+  else
+  {
+    const std::string calc_name = "calloc";
+    const std::string calc_id = "c:@F@calloc";
+    const symbolt &calc_sym = *context.find_symbol(calc_id);
+    side_effect_expr_function_callt calc_call;
+    get_library_function_call(
+      calc_name,
+      calc_id,
+      symbol_expr(calc_sym).type(),
+      location_begin,
+      calc_call);
+
+    exprt size_of_expr;
+    get_size_of_expr(elem_type, size_of_expr);
+
+    calc_call.arguments().push_back(size);
+    calc_call.arguments().push_back(size_of_expr);
+    added_symbol.value = calc_call;
   }
 
   new_expr = symbol_expr(added_symbol);
