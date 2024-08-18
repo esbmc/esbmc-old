@@ -102,7 +102,6 @@ void goto_symext::assertion(
 {
   expr2tc expr = the_assertion;
   cur_state->guard.guard_expr(expr);
-  cur_state->global_guard.guard_expr(expr);
   remaining_claims++;
   target->assertion(
     cur_state->guard.as_expr(),
