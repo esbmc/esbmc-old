@@ -703,28 +703,12 @@ bool solidity_convertert::get_var_decl(
     **/
 
     // construct calloc call
-    const std::string calc_name = "calloc";
-    const std::string calc_id = "c:@F@calloc";
-    const symbolt &calc_sym = *context.find_symbol(calc_id);
     side_effect_expr_function_callt calc_call;
-    get_library_function_call(
-      calc_name,
-      calc_id,
-      symbol_expr(calc_sym).type(),
-      location_begin,
-      calc_call);
+    get_calloc_function_call(location_begin, calc_call);
 
     // construct memcpy call
-    const std::string memc_name = "memcpy";
-    const std::string memc_id = "c:@F@memcpy";
-    const symbolt &memc_sym = *context.find_symbol(memc_id);
     side_effect_expr_function_callt memc_call;
-    get_library_function_call(
-      memc_name,
-      memc_id,
-      symbol_expr(memc_sym).type(),
-      location_begin,
-      memc_call);
+    get_memcpy_function_call(location_begin, memc_call);
 
     // memcpy arguments
     exprt arg0, arg1, arg2;
@@ -889,99 +873,95 @@ bool solidity_convertert::get_var_decl(
     return false;
   }
 
-  exprt val;
-  if (has_init && !is_inherited)
+  else if (t_sol_type == "STRING")
   {
-    if (get_init_expr(ast_node, t, val))
-      return true;
-
-    // for string
+    // char *x
+    // - x = (char *)malloc(32);
+    //
+    // char *x = "123"
+    // - char *x = &"123"[0]
+    //
     // char * x = (this->)y
     // - x = (char *)malloc(strlen(y) + 1);
     // - strcpy(x, y)
-    if (t_sol_type == "STRING" && val.get("#sol_type") == "STRING")
+    exprt val;
+    if (has_init)
     {
-      // do strlen
-      const std::string strl_name = "strlen";
-      const std::string strl_id = "c:@F@strlen";
-      const symbolt &strl_sym = *context.find_symbol(strl_id);
-      side_effect_expr_function_callt strl_call;
-      get_library_function_call(
-        strl_name,
-        strl_id,
-        symbol_expr(strl_sym).type(),
-        location_begin,
-        strl_call);
-      strl_call.arguments().push_back(val);
+      if (get_init_expr(ast_node, t, val))
+        return true;
 
-      exprt one_expr = constant_exprt(
-        integer2binary(1, bv_width(unsignedbv_typet(8))),
-        integer2string(1),
-        unsignedbv_typet(8));
-
-      exprt _add = exprt("+", uint_type());
-      _add.move_to_operands(strl_call, one_expr);
-
-      // do malloc
-      const std::string malc_name = "malloc";
-      const std::string malc_id = "c:@F@malloc";
-      const symbolt &malc_sym = *context.find_symbol(malc_id);
-      side_effect_expr_function_callt malc_call;
-      get_library_function_call(
-        malc_name,
-        malc_id,
-        symbol_expr(malc_sym).type(),
-        location_begin,
-        malc_call);
-      malc_call.arguments().push_back(_add);
-
-      added_symbol.value = malc_call;
-      decl.operands().push_back(malc_call);
-
-      // do strcpy
-      const std::string stry_name = "strcpy";
-      const std::string stry_id = "c:@F@strcpy";
-      const symbolt &stry_sym = *context.find_symbol(stry_id);
-      side_effect_expr_function_callt stry_call;
-      get_library_function_call(
-        stry_name,
-        stry_id,
-        symbol_expr(stry_sym).type(),
-        location_begin,
-        stry_call);
-      stry_call.arguments().push_back(symbol_expr(added_symbol));
-      stry_call.arguments().push_back(val);
-
-      if (is_state_var && !is_inherited)
+      if (val.type().get("#sol_type") == "STRING")
       {
-        // construct a dump symbol
-        symbolt dump;
-        get_default_symbol(
-          dump, debug_modulename, empty_typet(), name, id, location_begin);
-        dump.name = val.name().as_string() + "STRING_CPY";
-        dump.id = val.identifier().as_string() + "STRING_CPY";
-        dump.static_lifetime = false;
-        dump.type.set("#sol_type", "STRING_CPY");
-        dump.value = stry_call;
-        symbolt &added_dump = *move_symbol_to_context(dump);
+        // A variable of type bytes32 can't contain strings longer than 32 characters
+        // A variable of type string can contain a string of any size.
+        // For compromisation, we set it to 32-width
+        exprt size_expr = constant_exprt(
+          integer2binary(32, bv_width(uint_type())),
+          integer2string(32),
+          uint_type());
 
-        initializers.push_back(&added_symbol);
-        initializers.push_back(&added_dump);
+        // do malloc
+        side_effect_expr_function_callt malc_call;
+        get_malloc_function_call(location_begin, malc_call);
+        malc_call.arguments().push_back(size_expr);
+
+        added_symbol.value = malc_call;
+        decl.operands().push_back(malc_call);
+
+        // do strcpy
+        side_effect_expr_function_callt stry_call;
+        get_strcpy_function_call(location_begin, stry_call);
+        stry_call.arguments().push_back(symbol_expr(added_symbol));
+        stry_call.arguments().push_back(val);
+
+        if (is_state_var && !is_inherited)
+        {
+          // construct a dump symbol
+          symbolt dump;
+          get_default_symbol(
+            dump, debug_modulename, empty_typet(), name, id, location_begin);
+          dump.name = val.name().as_string() + "STRING_CPY";
+          dump.id = val.identifier().as_string() + "STRING_CPY";
+          dump.static_lifetime = false;
+          dump.type.set("#sol_type", "STRING_CPY");
+          dump.value = stry_call;
+          symbolt &added_dump = *move_symbol_to_context(dump);
+
+          initializers.push_back(&added_symbol);
+          initializers.push_back(&added_dump);
+        }
+        else if (!is_state_var)
+        {
+          // will be handled in get_block()
+          convert_expression_to_code(malc_call);
+          decl.location() = location_begin;
+          current_blockDecl.move_to_operands(decl, malc_call);
+        }
+        new_expr = code_skipt();
+        // do not fall through
+        return false;
       }
-      else if (!is_state_var)
+
+      else if (val.type().get("#sol_type") == "STRING_LITERAL")
       {
-        // will be handled in get_block()
-        convert_expression_to_code(malc_call);
-        decl.location() = location_begin;
-        current_blockDecl.move_to_operands(decl, malc_call);
+        added_symbol.value = val;
+        decl.operands().push_back(val);
       }
-      new_expr = code_skipt();
-      return false;
     }
     else
     {
-      added_symbol.value = val;
-      decl.operands().push_back(val);
+      exprt size_expr = constant_exprt(
+        integer2binary(32, bv_width(uint_type())),
+        integer2string(32),
+        uint_type());
+
+      // do malloc
+      side_effect_expr_function_callt malc_call;
+      get_malloc_function_call(location_begin, malc_call);
+      malc_call.arguments().push_back(size_expr);
+
+      added_symbol.value = malc_call;
+      decl.operands().push_back(malc_call);
     }
   }
   else if (is_not_init_contract_var)
@@ -1007,6 +987,7 @@ bool solidity_convertert::get_var_decl(
     const std::string contract_name =
       ast_node["typeName"]["pathNode"]["name"].get<std::string>();
 
+    exprt val;
     // 2. add a empty constructor to mimic C++ object auto instantiation
     // e.g. Base x => Base x = Base(p) where p is a integer pointer
     if (get_instantiation_ctor_call(contract_name, val))
@@ -1023,16 +1004,8 @@ bool solidity_convertert::get_var_decl(
     // => int256* x = calloc(50, sizeof(int256));
 
     // construct calloc call
-    const std::string calc_name = "calloc";
-    const std::string calc_id = "c:@F@calloc";
-    const symbolt &calc_sym = *context.find_symbol(calc_id);
     side_effect_expr_function_callt calc_call;
-    get_library_function_call(
-      calc_name,
-      calc_id,
-      symbol_expr(calc_sym).type(),
-      location_begin,
-      calc_call);
+    get_calloc_function_call(location_begin, calc_call);
 
     exprt size_expr = constant_exprt(
       integer2binary(50, bv_width(uint_type())),
@@ -1049,6 +1022,16 @@ bool solidity_convertert::get_var_decl(
     // assign it as the initial value
     added_symbol.value = calc_call;
     decl.operands().push_back(calc_call);
+  }
+
+  // now we have rule out other special cases
+  else if (has_init && !is_inherited)
+  {
+    exprt val;
+    if (get_init_expr(ast_node, t, val))
+      return true;
+    added_symbol.value = val;
+    decl.operands().push_back(val);
   }
 
   // store state variable, which will be initialized in the constructor
@@ -1704,6 +1687,7 @@ bool solidity_convertert::move_initializer_to_ctor(
         arg0 = member_exprt(base, arg0.name(), arg0.type());
         if (arg1.type().get_bool("#sol_state_var") == true)
           // e.g. uint[] x = y;
+          // ? shouldn't we already add the this ptr?
           arg1 = member_exprt(base, arg1.name(), arg1.type());
 
         convert_expression_to_code(memc);
@@ -4164,18 +4148,8 @@ bool solidity_convertert::get_binary_operator_expr(
       {
         // construct calloc
         // theoretically, dyn array should use malloc
-        const std::string calc_name = "calloc";
-        const std::string calc_id = "c:@F@calloc";
-        const symbolt &calc_sym = *context.find_symbol(calc_id);
         side_effect_expr_function_callt calc_call;
-        get_library_function_call(
-          calc_name,
-          calc_id,
-          symbol_expr(calc_sym).type(),
-          lhs.location(),
-          calc_call);
-        calc_call.arguments().push_back(size_expr);
-        calc_call.arguments().push_back(size_of_expr);
+        get_calloc_function_call(lhs.location(), calc_call);
 
         _assign = side_effect_exprt("assign", lhs.type());
         solidity_gen_typecast(ns, calc_call, lhs.type());
@@ -4183,16 +4157,8 @@ bool solidity_convertert::get_binary_operator_expr(
       }
 
       // construct memcpy call
-      const std::string memc_name = "memcpy";
-      const std::string memc_id = "c:@F@memcpy";
-      const symbolt &memc_sym = *context.find_symbol(memc_id);
       side_effect_expr_function_callt memc_call;
-      get_library_function_call(
-        memc_name,
-        memc_id,
-        symbol_expr(memc_sym).type(),
-        lhs.location(),
-        memc_call);
+      get_calloc_function_call(lhs.location(), memc_call);
 
       // populate memcpy arguments
       exprt arg2 = exprt("*", long_uint_type());
@@ -4219,16 +4185,8 @@ bool solidity_convertert::get_binary_operator_expr(
     else if (lt_sol == "STRING" && rt_sol == "STRING")
     {
       // x = y ==> strcpy(x,y)
-      const std::string stry_name = "strcpy";
-      const std::string stry_id = "c:@F@strcpy";
-      const symbolt &stry_sym = *context.find_symbol(stry_id);
       side_effect_expr_function_callt stry_call;
-      get_library_function_call(
-        stry_name,
-        stry_id,
-        symbol_expr(stry_sym).type(),
-        lhs.location(),
-        stry_call);
+      get_strcpy_function_call(lhs.location(), stry_call);
       stry_call.arguments().push_back(lhs);
       stry_call.arguments().push_back(rhs);
 
@@ -5847,6 +5805,50 @@ void solidity_convertert::get_library_function_call(
     call_expr.type() = t;
 
   new_expr = call_expr;
+}
+
+void solidity_convertert::get_malloc_function_call(
+  const locationt &loc,
+  side_effect_expr_function_callt &malc_call)
+{
+  const std::string malc_name = "malloc";
+  const std::string malc_id = "c:@F@malloc";
+  const symbolt &malc_sym = *context.find_symbol(malc_id);
+  get_library_function_call(
+    malc_name, malc_id, symbol_expr(malc_sym).type(), loc, malc_call);
+}
+
+void solidity_convertert::get_calloc_function_call(
+  const locationt &loc,
+  side_effect_expr_function_callt &calc_call)
+{
+  const std::string calc_name = "calloc";
+  const std::string calc_id = "c:@F@calloc";
+  const symbolt &calc_sym = *context.find_symbol(calc_id);
+  get_library_function_call(
+    calc_name, calc_id, symbol_expr(calc_sym).type(), loc, calc_call);
+}
+
+void solidity_convertert::get_strcpy_function_call(
+  const locationt &loc,
+  side_effect_expr_function_callt &stry_call)
+{
+  const std::string stry_name = "strcpy";
+  const std::string stry_id = "c:@F@strcpy";
+  const symbolt &stry_sym = *context.find_symbol(stry_id);
+  get_library_function_call(
+    stry_name, stry_id, symbol_expr(stry_sym).type(), loc, stry_call);
+}
+
+void solidity_convertert::get_memcpy_function_call(
+  const locationt &loc,
+  side_effect_expr_function_callt &memc_call)
+{
+  const std::string memc_name = "memcpy";
+  const std::string memc_id = "c:@F@memcpy";
+  const symbolt &memc_sym = *context.find_symbol(memc_id);
+  get_library_function_call(
+    memc_name, memc_id, symbol_expr(memc_sym).type(), loc, memc_call);
 }
 
 // check if the function is a library function (defined in solidity.h)
@@ -7637,9 +7639,8 @@ bool solidity_convertert::get_empty_array_ref(
   const nlohmann::json literal_type = callee_arg_json["typeDescriptions"];
   if (get_expr(callee_arg_json, literal_type, size))
     return true;
-  if (size.cformat().empty())
-    // ?fix: it seems if this is uint256 we will get internal width-assertion fails
-    solidity_gen_typecast(ns, size, uint_type());
+  if (!size.cformat().empty())
+  {
 
   // 3. declare array
   typet arr_type = array_typet(elem_type, size);
@@ -7662,23 +7663,29 @@ bool solidity_convertert::get_empty_array_ref(
   symbolt &added_symbol = *move_symbol_to_context(symbol);
 
   // Poplulate default value
-  if (size.value().as_string() != "" && size.value().as_string() != "0")
-  {
-    added_symbol.value = gen_zero(arr_type);
-    added_symbol.value.zero_initializer(true);
+  added_symbol.value = gen_zero(arr_type);
+  added_symbol.value.zero_initializer(true);
   }
   else
   {
-    const std::string calc_name = "calloc";
-    const std::string calc_id = "c:@F@calloc";
-    const symbolt &calc_sym = *context.find_symbol(calc_id);
+      // Get Symbol
+    exprt src_expr;
+    get_aux_array(src_expr, new_expr);
+    
+  typet arr_type = pointer_typet();
+  arr_type.set("#sol_type_name", "ARRAY");
+  symbolt symbol;
+  get_default_symbol(
+    symbol, debug_modulename, arr_type, name, id, location_begin);
+
+  symbol.lvalue = true;
+  symbol.static_lifetime = true;
+  symbol.file_local = false;
+  symbol.is_extern = true;
+
+  symbolt &added_symbol = *move_symbol_to_context(symbol);
     side_effect_expr_function_callt calc_call;
-    get_library_function_call(
-      calc_name,
-      calc_id,
-      symbol_expr(calc_sym).type(),
-      location_begin,
-      calc_call);
+    get_calloc_function_call(location_begin, calc_call);
 
     exprt size_of_expr;
     get_size_of_expr(elem_type, size_of_expr);

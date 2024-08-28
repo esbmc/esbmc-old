@@ -166,6 +166,18 @@ protected:
     const typet &t,
     const locationt &l,
     exprt &new_expr);
+  void get_malloc_function_call(
+    const locationt &loc,
+    side_effect_expr_function_callt &_call);
+  void get_calloc_function_call(
+    const locationt &loc,
+    side_effect_expr_function_callt &_call);
+  void get_strcpy_function_call(
+    const locationt &loc,
+    side_effect_expr_function_callt &_call);
+  void get_memcpy_function_call(
+    const locationt &loc,
+    side_effect_expr_function_callt &_call);
   bool is_library_function(const std::string &id);
   bool get_empty_array_ref(const nlohmann::json &ast_node, exprt &new_expr);
   void get_aux_array_name(std::string &aux_name, std::string &aux_id);
