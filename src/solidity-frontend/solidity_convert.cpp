@@ -7556,13 +7556,13 @@ static inline void static_lifetime_init(const contextt &context, codet &dest)
 
   // call designated "initialization" functions
   context.foreach_operand_in_order([&dest](const symbolt &s) {
-      if (s.type.initialization() && s.type.is_code())
-      {
-        code_function_callt function_call;
-        function_call.function() = symbol_expr(s);
-        dest.move_to_operands(function_call);
-      }
-    });
+    if (s.type.initialization() && s.type.is_code())
+    {
+      code_function_callt function_call;
+      function_call.function() = symbol_expr(s);
+      dest.move_to_operands(function_call);
+    }
+  });
 }
 
 void solidity_convertert::get_aux_array_name(
@@ -7641,49 +7641,48 @@ bool solidity_convertert::get_empty_array_ref(
     return true;
   if (!size.cformat().empty())
   {
+    // 3. declare array
+    typet arr_type = array_typet(elem_type, size);
+    arr_type.set("#sol_type", "ARRAY_LITERAL");
+    if (!size.cformat().empty())
+      arr_type.set("#sol_array_size", size.cformat().as_string());
 
-  // 3. declare array
-  typet arr_type = array_typet(elem_type, size);
-  arr_type.set("#sol_type", "ARRAY_LITERAL");
-  if (!size.cformat().empty())
-    arr_type.set("#sol_array_size", size.cformat().as_string());
+    // Get Symbol
+    symbolt symbol;
+    get_default_symbol(
+      symbol, debug_modulename, arr_type, name, id, location_begin);
 
-  // Get Symbol
-  symbolt symbol;
-  get_default_symbol(
-    symbol, debug_modulename, arr_type, name, id, location_begin);
+    symbol.lvalue = true;
+    // set it to static as its value will not be changed will being able to
+    // be referred in other contracts via inheritance
+    symbol.static_lifetime = true;
+    symbol.file_local = false;
+    symbol.is_extern = true;
 
-  symbol.lvalue = true;
-  // set it to static as its value will not be changed will being able to
-  // be referred in other contracts via inheritance
-  symbol.static_lifetime = true;
-  symbol.file_local = false;
-  symbol.is_extern = true;
+    symbolt &added_symbol = *move_symbol_to_context(symbol);
 
-  symbolt &added_symbol = *move_symbol_to_context(symbol);
-
-  // Poplulate default value
-  added_symbol.value = gen_zero(arr_type);
-  added_symbol.value.zero_initializer(true);
+    // Poplulate default value
+    added_symbol.value = gen_zero(arr_type);
+    added_symbol.value.zero_initializer(true);
   }
   else
   {
-      // Get Symbol
+    // Get Symbol
     exprt src_expr;
     get_aux_array(src_expr, new_expr);
-    
-  typet arr_type = pointer_typet();
-  arr_type.set("#sol_type_name", "ARRAY");
-  symbolt symbol;
-  get_default_symbol(
-    symbol, debug_modulename, arr_type, name, id, location_begin);
 
-  symbol.lvalue = true;
-  symbol.static_lifetime = true;
-  symbol.file_local = false;
-  symbol.is_extern = true;
+    typet arr_type = pointer_typet();
+    arr_type.set("#sol_type_name", "ARRAY");
+    symbolt symbol;
+    get_default_symbol(
+      symbol, debug_modulename, arr_type, name, id, location_begin);
 
-  symbolt &added_symbol = *move_symbol_to_context(symbol);
+    symbol.lvalue = true;
+    symbol.static_lifetime = true;
+    symbol.file_local = false;
+    symbol.is_extern = true;
+
+    symbolt &added_symbol = *move_symbol_to_context(symbol);
     side_effect_expr_function_callt calc_call;
     get_calloc_function_call(location_begin, calc_call);
 

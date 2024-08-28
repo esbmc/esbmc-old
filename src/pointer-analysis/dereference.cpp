@@ -909,7 +909,7 @@ void dereferencet::build_reference_rec(
   else if (is_array_type(type))
   {
     std::string sol = options.get_option("sol");
-    if(sol.empty())
+    if (sol.empty())
     {
       log_error(
         "Can't construct rvalue reference to array type during dereference\n"
