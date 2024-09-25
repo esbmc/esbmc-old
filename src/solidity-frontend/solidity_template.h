@@ -12,12 +12,13 @@ namespace SolidityTemplate
 {
 /// header & typedef
 const std::string sol_header = R"(
-#include <stddef.h>
-#include <stdlib.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdlib>
+#include <cstdint>
 #include <string.h>
-#include <stdbool.h>
-#include <assert.h>
+#include <string>
+#include <cstdbool>
+#include <cassert>
 )";
 
 /*
@@ -361,9 +362,12 @@ uint256_t str2int(char *str)
 
 const std::string sol_ext_library = sol_str2hex;
 
+const std::string sol_c_library = "extern \"C\" {" + sol_typedef + sol_vars +
+                                  sol_funcs + sol_mapping + sol_ext_library +
+                                  "}";
+
 // combination
-const std::string sol_library = sol_header + sol_typedef + sol_vars +
-                                sol_funcs + sol_mapping + sol_ext_library;
+const std::string sol_library = sol_header + sol_c_library;
 
 }; // namespace SolidityTemplate
 

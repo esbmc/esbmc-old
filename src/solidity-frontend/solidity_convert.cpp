@@ -872,98 +872,6 @@ bool solidity_convertert::get_var_decl(
 
     return false;
   }
-
-  else if (t_sol_type == "STRING")
-  {
-    // char *x
-    // - x = (char *)malloc(32);
-    //
-    // char *x = "123"
-    // - char *x = &"123"[0]
-    //
-    // char * x = (this->)y
-    // - x = (char *)malloc(strlen(y) + 1);
-    // - strcpy(x, y)
-    exprt val;
-    if (has_init)
-    {
-      if (get_init_expr(ast_node, t, val))
-        return true;
-
-      if (val.type().get("#sol_type") == "STRING")
-      {
-        // A variable of type bytes32 can't contain strings longer than 32 characters
-        // A variable of type string can contain a string of any size.
-        // For compromisation, we set it to 32-width
-        exprt size_expr = constant_exprt(
-          integer2binary(32, bv_width(uint_type())),
-          integer2string(32),
-          uint_type());
-
-        // do malloc
-        side_effect_expr_function_callt malc_call;
-        get_malloc_function_call(location_begin, malc_call);
-        malc_call.arguments().push_back(size_expr);
-
-        added_symbol.value = malc_call;
-        decl.operands().push_back(malc_call);
-
-        // do strcpy
-        side_effect_expr_function_callt stry_call;
-        get_strcpy_function_call(location_begin, stry_call);
-        stry_call.arguments().push_back(symbol_expr(added_symbol));
-        stry_call.arguments().push_back(val);
-
-        if (is_state_var && !is_inherited)
-        {
-          // construct a dump symbol
-          symbolt dump;
-          get_default_symbol(
-            dump, debug_modulename, empty_typet(), name, id, location_begin);
-          dump.name = val.name().as_string() + "STRING_CPY";
-          dump.id = val.identifier().as_string() + "STRING_CPY";
-          dump.static_lifetime = false;
-          dump.type.set("#sol_type", "STRING_CPY");
-          dump.value = stry_call;
-          symbolt &added_dump = *move_symbol_to_context(dump);
-
-          initializers.push_back(&added_symbol);
-          initializers.push_back(&added_dump);
-        }
-        else if (!is_state_var)
-        {
-          // will be handled in get_block()
-          convert_expression_to_code(malc_call);
-          decl.location() = location_begin;
-          current_blockDecl.move_to_operands(decl, malc_call);
-        }
-        new_expr = code_skipt();
-        // do not fall through
-        return false;
-      }
-
-      else if (val.type().get("#sol_type") == "STRING_LITERAL")
-      {
-        added_symbol.value = val;
-        decl.operands().push_back(val);
-      }
-    }
-    else
-    {
-      exprt size_expr = constant_exprt(
-        integer2binary(32, bv_width(uint_type())),
-        integer2string(32),
-        uint_type());
-
-      // do malloc
-      side_effect_expr_function_callt malc_call;
-      get_malloc_function_call(location_begin, malc_call);
-      malc_call.arguments().push_back(size_expr);
-
-      added_symbol.value = malc_call;
-      decl.operands().push_back(malc_call);
-    }
-  }
   else if (is_not_init_contract_var)
   {
     log_debug("solidity", "Handling uninitialized contract type variable");
@@ -4182,17 +4090,6 @@ bool solidity_convertert::get_binary_operator_expr(
       log_error("Dynamic array assignment is currently unsupported.");
       return true;
     }
-    else if (lt_sol == "STRING" && rt_sol == "STRING")
-    {
-      // x = y ==> strcpy(x,y)
-      side_effect_expr_function_callt stry_call;
-      get_strcpy_function_call(lhs.location(), stry_call);
-      stry_call.arguments().push_back(lhs);
-      stry_call.arguments().push_back(rhs);
-
-      new_expr = stry_call;
-      return false;
-    }
 
     new_expr = side_effect_exprt("assign", t);
     break;
@@ -6023,18 +5920,8 @@ bool solidity_convertert::get_elementary_type_name(
   }
   case SolidityGrammar::ElementaryTypeNameT::STRING:
   {
-    /* ESBMC v7.6.1 can't construct rvalue reference to array type during dereference
-    size_t value_length = 128;
-
-    new_type = array_typet(
-      signed_char_type(),
-      constant_exprt(
-        integer2binary(value_length, bv_width(int_type())),
-        integer2string(value_length),
-        int_type()));
-    */
-    new_type = char_type();
-    new_type = pointer_typet(new_type);
+    // cpp: std::string str;
+    new_type = context.find_symbol("tag-std::string")->type;
     new_type.set("#sol_type", "STRING");
     break;
   }
