@@ -200,6 +200,16 @@ int findKeyI(struct NodeI *head, int256_t key)
 }
 )";
 
+const std::string sol_array = R"(
+void *arrcpy(void *from_array, size_t from_size, size_t size_of)
+{
+  assert(from_size != 0);
+  void *to_array = (void *)calloc(from_size, size_of);
+  memcpy(to_array, from_array, from_size * size_of);
+  return to_array;
+}
+)";
+
 /// external library
 // itoa
 /* 
@@ -363,11 +373,21 @@ uint256_t str2int(char *str)
 const std::string sol_ext_library = sol_str2hex;
 
 const std::string sol_c_library = "extern \"C\" {" + sol_typedef + sol_vars +
-                                  sol_funcs + sol_mapping + sol_ext_library +
-                                  "}";
+                                  sol_funcs + sol_mapping + sol_array +
+                                  sol_ext_library + "}";
+
+// For C++
+const std::string sol_cpp_string = R"(
+void _streq(std::string &str1, const char str2[])
+{
+  str1 = std::string(str2);
+}
+)";
+
+const std::string sol_cpp_library = sol_cpp_string;
 
 // combination
-const std::string sol_library = sol_header + sol_c_library;
+const std::string sol_library = sol_header + sol_c_library + sol_cpp_library;
 
 }; // namespace SolidityTemplate
 

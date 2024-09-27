@@ -172,7 +172,13 @@ protected:
   void get_calloc_function_call(
     const locationt &loc,
     side_effect_expr_function_callt &_call);
+  void get_arrcpy_function_call(
+    const locationt &loc,
+    side_effect_expr_function_callt &calc_call);
   void get_strcpy_function_call(
+    const locationt &loc,
+    side_effect_expr_function_callt &_call);
+  void get_streq_function_call(
     const locationt &loc,
     side_effect_expr_function_callt &_call);
   void get_memcpy_function_call(
@@ -201,6 +207,10 @@ protected:
     exprt &new_expr);
   void get_tuple_assignment(code_blockt &_block, const exprt &lop, exprt rop);
   void get_tuple_function_call(code_blockt &_block, const exprt &op);
+
+  // string
+  void
+  get_string_assignment(const exprt &lhs, const exprt &rhs, exprt &new_expr);
 
   // mapping
   bool get_mapping_type(const nlohmann::json &ast_node, typet &t);
