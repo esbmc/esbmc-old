@@ -3258,6 +3258,16 @@ bool solidity_convertert::get_expr(
         // otherwise we need to convert a string to decimal ASCII values
         else
         {
+          // string => const char* => int
+          side_effect_expr_function_callt _2chcall;
+          get_library_function_call(
+            "_tochar",
+            "c:@F@_tochar#$@N@std@S@string#",
+            pointer_typet(char_type()),
+            base.location(),
+            _2chcall);
+          _2chcall.arguments().push_back(pos);
+
           // signed char * c:@F@str2int
           // e.g. "Geek" => "1197827435"
           // pos => str2int(pos)
@@ -3270,7 +3280,7 @@ bool solidity_convertert::get_expr(
             _call);
 
           // insert arguments
-          _call.arguments().push_back(pos);
+          _call.arguments().push_back(_2chcall);
           pos = _call;
         }
       }
@@ -5535,9 +5545,12 @@ bool solidity_convertert::get_mapping_key_expr(
     return false;
   }
 
-  std::string struct_node_id = "tag-struct Node" + postfix;
+  std::string struct_node_id = "tag-Node" + postfix;
   if (context.find_symbol(struct_node_id) == nullptr)
+  {
+    log_error("Cannot find the Mapping Node Template");
     return true;
+  }
   exprt node = symbol_expr(*context.find_symbol(struct_node_id));
 
   // struct Node *

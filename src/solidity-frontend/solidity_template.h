@@ -341,7 +341,7 @@ char *decToHexa(int n)
     ans[pos] = '\0';
     return ans;
 }
-char *ASCIItoHEX(char *ascii)
+char *ASCIItoHEX(const char *ascii)
 {
     char *hex = (char *)malloc(256 * sizeof(char));
     hex[0] = '\0';
@@ -364,7 +364,7 @@ uint256_t hexdec(const char *hex)
     }
     return ret;
 }
-uint256_t str2int(char *str)
+uint256_t str2int(const char *str)
 {
     return hexdec(ASCIItoHEX(str));
 }
@@ -387,6 +387,10 @@ void _streq(std::string &str1, std::string str2)
 std::string _tostr(const char* ptr)
 {
   return std::string(ptr);
+}
+const char* _tochar(std::string str)
+{
+  return str.c_str();
 }
 )";
 
