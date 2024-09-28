@@ -1086,6 +1086,9 @@ bool solidity_convertert::get_struct_class_method(
   if (get_func_decl_ref(ast_node, comp))
     return true;
 
+  log_debug(
+    "solidity", "\t\t@@@ populating method {}", comp.identifier().as_string());
+
   if (comp.is_code() && to_code(comp).statement() == "skip")
     return false;
 
@@ -1349,6 +1352,7 @@ void solidity_convertert::merge_inheritance_ast(
   const std::string &c_name,
   std::set<std::string> &merged_list)
 {
+  log_debug("solidity", "@@@ Merging AST for contract {}", c_name);
   // we have merged this contract
   if (merged_list.count(c_name) > 0)
     return;
@@ -1396,13 +1400,6 @@ void solidity_convertert::merge_inheritance_ast(
           if (is_dubplicate)
             continue;
 
-          // external & private function/state variable cannot be inherited
-          // however, we need to simulate cases like public functions accessing
-          // private members. thus we just inherited it and avoid setting them as the
-          // entry function for the verification, i.e. set it to private
-          if (i.contains("visibility") && i["visibility"] == "external")
-            i["visibility"] = "private";
-
           // skip ctor
           if (i.contains("kind") && i["kind"] == "constructor")
             continue;
@@ -1445,6 +1442,11 @@ void solidity_convertert::merge_inheritance_ast(
 
           // Here we have ruled out the special cases
           // so that we could merge the AST
+          log_debug(
+            "solidity",
+            "\t@@@ Merging AST node {} to contract {}",
+            i["name"].get<std::string>().c_str(),
+            c_name);
           i.push_back({"is_inherited", true});
           c_node["nodes"].push_back(i);
         }
@@ -1708,10 +1710,15 @@ bool solidity_convertert::move_inheritance_to_ctor(
               lhs = member_exprt(this_expr, comp.name(), comp.type());
               rhs = member_exprt(
                 symbol_expr(added_ctor_symbol), c_comp.name(), c_comp.type());
-              _assign = side_effect_exprt("assign", comp.type());
+              if (comp.type().get("#sol_type") == "STRING")
+                get_string_assignment(lhs, rhs, _assign);
+              else
+              {
+                _assign = side_effect_exprt("assign", comp.type());
 
-              convert_type_expr(ns, rhs, comp.type());
-              _assign.copy_to_operands(lhs, rhs);
+                convert_type_expr(ns, rhs, comp.type());
+                _assign.copy_to_operands(lhs, rhs);
+              }
 
               convert_expression_to_code(_assign);
               // insert after the object declaration
@@ -1850,15 +1857,6 @@ bool solidity_convertert::get_function_definition(
   else
     current_functionName = (*current_functionDecl)["name"].get<std::string>();
 
-  // TODO: handle override: e.g.
-  // contract D is B, C {
-  // // D.foo() returns "C"
-  // // since C is the right most parent contract with function foo()
-  //     function foo() public pure override(B, C) returns (string memory) {
-  //         return super.foo();
-  //     }
-  // }
-
   // 4. Return type
   code_typet type;
   if (is_ctor)
@@ -1902,6 +1900,7 @@ bool solidity_convertert::get_function_definition(
   // 7. Populate "std::string id, name"
   std::string name, id;
   get_function_definition_name(ast_node, name, id);
+  log_debug("solidity", "\t\t@@@ Parsing function {}", id.c_str());
 
   if (context.find_symbol(id) != nullptr)
   {
@@ -1909,9 +1908,6 @@ bool solidity_convertert::get_function_definition(
     current_functionName = old_functionName;
     return false;
   }
-
-  if (name == "func_dynamic")
-    printf("@@ found func_dynamic\n");
 
   // 8. populate "std::string debug_modulename"
   std::string debug_modulename =
@@ -3618,31 +3614,33 @@ bool solidity_convertert::get_current_contract_name(
 
   if (!is_contract_member_access)
   {
-    if (ast_node.contains("id"))
-    {
-      const int ref_id = ast_node["id"].get<int>();
+    contract_name = current_contractName;
+    return false;
+    // if (ast_node.contains("id"))
+    // {
+    //   const int ref_id = ast_node["id"].get<int>();
 
-      if (exportedSymbolsList.count(ref_id))
-      {
-        // this can be contract, error, et al.
-        // therefore, we utilize the linearizedBaseList to make sure it's really a contract
-        std::string c_name = exportedSymbolsList[ref_id];
-        if (linearizedBaseList.count(c_name))
-          contract_name = exportedSymbolsList[ref_id];
-        else
-          // for definitions that are outside contract
-          contract_name = "";
-      }
-      else
-      {
-        std::string tmp = "";
-        find_decl_ref(ref_id, tmp);
-        if (tmp != "")
-          contract_name = current_contractName;
-      }
-      return false;
-    }
-    return true;
+    //   if (exportedSymbolsList.count(ref_id))
+    //   {
+    //     // this can be contract, error, et al.
+    //     // therefore, we utilize the linearizedBaseList to make sure it's really a contract
+    //     std::string c_name = exportedSymbolsList[ref_id];
+    //     if (linearizedBaseList.count(c_name))
+    //       contract_name = exportedSymbolsList[ref_id];
+    //     else
+    //       // for definitions that are outside contract
+    //       contract_name = "";
+    //   }
+    //   else
+    //   {
+    //     std::string tmp = "";
+    //     find_decl_ref(ref_id, tmp);
+    //     if (tmp != "")
+    //       contract_name = current_contractName;
+    //   }
+    //   return false;
+    // }
+    // return true;
   }
   else
   {
@@ -3683,10 +3681,9 @@ bool solidity_convertert::get_current_contract_name(
         find_decl_ref(ref_id, contract_name);
       return false;
     }
-
-    // unexpected
-    return true;
   }
+  // unexpected
+  return true;
 }
 
 bool solidity_convertert::get_binary_operator_expr(
@@ -7097,9 +7094,6 @@ bool solidity_convertert::get_new_object_ctor_call(
   const nlohmann::json &ast_node,
   exprt &new_expr)
 {
-  // we need to obtain the real contract name
-  is_contract_member_access = true;
-
   nlohmann::json callee_expr_json = ast_node["expression"];
   int ref_decl_id = callee_expr_json["typeName"]["referencedDeclaration"];
   exprt callee;
@@ -7133,9 +7127,6 @@ bool solidity_convertert::get_new_object_ctor_call(
 
   // construct temporary object
   get_temporary_object(call, new_expr);
-
-  // reset
-  is_contract_member_access = false;
 
   return false;
 }
