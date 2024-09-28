@@ -181,6 +181,9 @@ protected:
   void get_streq_function_call(
     const locationt &loc,
     side_effect_expr_function_callt &_call);
+  void get_tostr_function_call(
+    const locationt &loc,
+    side_effect_expr_function_callt &_call);
   void get_memcpy_function_call(
     const locationt &loc,
     side_effect_expr_function_callt &_call);

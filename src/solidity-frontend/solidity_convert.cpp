@@ -659,7 +659,9 @@ bool solidity_convertert::get_var_decl(
      SolidityGrammar::ContractTypeName) &&
     !has_init;
 
-  if ((!has_init || is_inherited) && !is_not_init_contract_var && !mapping)
+  bool set_init = has_init && !is_inherited;
+
+  if (!set_init && !is_not_init_contract_var && !mapping)
   {
     // for both state and non-state variables, set default value as zero
     symbol.value = gen_zero(get_complete_type(t, ns), true);
@@ -741,7 +743,7 @@ bool solidity_convertert::get_var_decl(
       decl.operands().push_back(calc_call);
     }
   }
-  else if (t_sol_type == "DYNARRAY" && (has_init && !is_inherited))
+  else if (t_sol_type == "DYNARRAY" && set_init)
   {
     exprt val;
     if (get_init_expr(ast_node, t, val))
@@ -863,9 +865,16 @@ bool solidity_convertert::get_var_decl(
     added_symbol.value = calc_call;
     decl.operands().push_back(calc_call);
   }
-
+  else if (t_sol_type == "STRING" && !set_init && is_state_var)
+  {
+    if (context.find_symbol("c:temp_sol.cpp@empty_str") == nullptr)
+      return true;
+    val = symbol_expr(*context.find_symbol("c:temp_sol.cpp@empty_str"));
+    added_symbol.value = val;
+    decl.operands().push_back(val);
+  }
   // now we have rule out other special cases
-  else if (has_init && !is_inherited)
+  else if (set_init)
   {
     if (get_init_expr(ast_node, t, val))
       return true;
@@ -5675,7 +5684,18 @@ void solidity_convertert::get_streq_function_call(
   side_effect_expr_function_callt &_call)
 {
   const std::string func_name = "_streq";
-  const std::string func_id = "c:@F@_streq#&$@N@std@S@string#*1C#";
+  const std::string func_id = "c:@F@_streq#&$@N@std@S@string#S1_#";
+  const symbolt &func_sym = *context.find_symbol(func_id);
+  get_library_function_call(
+    func_name, func_id, symbol_expr(func_sym).type(), loc, _call);
+}
+
+void solidity_convertert::get_tostr_function_call(
+  const locationt &loc,
+  side_effect_expr_function_callt &_call)
+{
+  const std::string func_name = "_tostr";
+  const std::string func_id = "c:@F@_tostr#*1C#";
   const symbolt &func_sym = *context.find_symbol(func_id);
   get_library_function_call(
     func_name, func_id, symbol_expr(func_sym).type(), loc, _call);

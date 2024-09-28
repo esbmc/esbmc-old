@@ -92,7 +92,14 @@ bool solidity_convertert::convert_string_literal(
       int_type()));
   // TODO: Handle null terminator byte
   string_constantt string(the_value, type, string_constantt::k_default);
-  dest.swap(string);
+
+  // convert char * to std::string
+  side_effect_expr_function_callt call;
+  locationt loc;
+  get_tostr_function_call(loc, call);
+  call.arguments().push_back(string);
+
+  dest.swap(call);
   dest.type().set("#sol_type", "STRING_LITERAL");
 
   return false;

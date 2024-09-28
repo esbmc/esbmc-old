@@ -378,9 +378,15 @@ const std::string sol_c_library = "extern \"C\" {" + sol_typedef + sol_vars +
 
 // For C++
 const std::string sol_cpp_string = R"(
-void _streq(std::string &str1, const char str2[])
+const std::string empty_str = "";
+void _streq(std::string &str1, std::string str2)
 {
-  str1 = std::string(str2);
+  __ESBMC_assume(!str2.empty());
+  str1 = str2;
+}
+std::string _tostr(const char* ptr)
+{
+  return std::string(ptr);
 }
 )";
 
