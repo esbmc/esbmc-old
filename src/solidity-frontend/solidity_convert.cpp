@@ -3453,9 +3453,11 @@ bool solidity_convertert::get_expr(
     }
 
     // case 3
+    is_contract_member_access = true;
     exprt call;
     if (get_new_object_ctor_call(expr, call))
       return true;
+    is_contract_member_access = false;
 
     new_expr = call;
     break;
@@ -6952,6 +6954,7 @@ bool solidity_convertert::is_mapping(const nlohmann::json &ast_node)
 }
 
 /** 
+    * call to a non-library function 
     * @param type: return type
     * @param decl_ref: the function declaration node
     * @param expr: the function caller node which contains the arguments
