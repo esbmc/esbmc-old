@@ -903,8 +903,8 @@ void generate_testcase(
   test_case
     << R"(<!DOCTYPE testcase PUBLIC "+//IDN sosy-lab.org//DTD test-format testcase 1.1//EN" "https://sosy-lab.org/test-format/testcase-1.1.dtd">)"
     << "\n";
-  test_case << R"(<testcase coversError="true">)"
-            << "\n";
+  // test_case << R"(<testcase coversError="true">)"
+  //           << "\n";
 
   // We should only show the symbol one time
   std::unordered_set<std::string> nondet;
@@ -933,14 +933,15 @@ void generate_testcase(
         test_case << fmt::format(
           "<input>{}</input>\n", to_constant_bool2t(new_rhs).value ? "1" : "0");
 
-      else
-      {
-        log_error(
-          "Could not convert the symbol into test "
-          "input");
-        new_rhs->dump();
-        abort();
-      }
+      // Comment for test-comp 
+      // else
+      // {
+      //   log_error(
+      //     "Could not convert the symbol into test "
+      //     "input");
+      //   new_rhs->dump();
+      //   abort();
+      // }
     }
   };
   for (auto const &SSA_step : target.SSA_steps)
