@@ -933,7 +933,7 @@ void generate_testcase(
         test_case << fmt::format(
           "<input>{}</input>\n", to_constant_bool2t(new_rhs).value ? "1" : "0");
 
-      // Comment for test-comp 
+      // Comment for test-comp
       // else
       // {
       //   log_error(
