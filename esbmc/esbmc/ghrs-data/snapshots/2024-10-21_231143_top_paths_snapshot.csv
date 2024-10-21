@@ -1,0 +1,11 @@
+url_path,views_total,views_unique
+/esbmc/esbmc,526,127
+/esbmc/esbmc/pulls,182,10
+/esbmc/esbmc/actions,142,5
+/esbmc/esbmc/issues,134,23
+/esbmc/esbmc/pull/2076,92,5
+/esbmc/esbmc/pull/2062,88,6
+/esbmc/esbmc/actions/workflows/benchexec.yml,54,4
+/esbmc/esbmc/blob/master/BUILDING.md,47,11
+/esbmc/esbmc/issues/2064,35,6
+/esbmc/esbmc/wiki/How-to-Create-a-New-Frontend-for-ESBMC,35,6
