@@ -85,7 +85,11 @@ public:
 
 extern inline const symbol_exprt &to_symbol_expr(const exprt &expr)
 {
-  assert(expr.id() == exprt::symbol && !expr.has_operands());
+  if(!(expr.id() == exprt::symbol && !expr.has_operands()))
+  {
+    expr.dump();
+    abort();
+  }
   return static_cast<const symbol_exprt &>(expr);
 }
 

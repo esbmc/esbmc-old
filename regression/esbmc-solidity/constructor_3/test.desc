@@ -1,4 +1,4 @@
 CORE
 contract.solast
---function Derive --contract Derive --sol contract.sol
+--contract Derive --sol contract.sol --unwind 3 --no-unwinding-assertions
 ^VERIFICATION FAILED$

@@ -47,6 +47,9 @@ enum TypeNameT
   // contract type
   ContractTypeName,
 
+  // Address type
+  AddressTypeName,
+
   // typecast
   TypeConversionName,
 
@@ -319,6 +322,9 @@ enum ExpressionT
   // FunctionCall
   CallExprClass,
 
+  // FunctionCallOptions
+  CallOptionsExprClass,
+
   // auxiliary type for implicit casting in Solidity, e.g. function return value
   // Solidity does NOT provide such information.
   ImplicitCastExprClass,
@@ -338,8 +344,12 @@ enum ExpressionT
   // i.e. x.caller();
   ContractMemberCall,
 
+  // Members of Address Types
+  // see https://docs.soliditylang.org/en/v0.8.23/units-and-global-variables.html#members-of-address-types
+  AddressMemberCall,
+
   // Type Converion
-  ElementaryTypeNameExpression,
+  TypeConversionExpression,
 
   // Struct Member Access
   StructMemberCall,

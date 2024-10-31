@@ -389,6 +389,10 @@ extern inline const code_typet &to_code_type(const typet &type)
 
 extern inline code_typet &to_code_type(typet &type)
 {
+  if(type.id() != typet::t_code)
+  {
+    type.dump();
+  }
   assert(type.id() == typet::t_code);
   return static_cast<code_typet &>(type);
 }

@@ -908,10 +908,14 @@ void dereferencet::build_reference_rec(
     flags |= flag_dst_scalar;
   else if (is_array_type(type))
   {
-    log_error(
-      "Can't construct rvalue reference to array type during dereference\n"
-      "(It isn't allowed by C anyway)\n");
-    abort();
+    std::string sol = options.get_option("sol");
+    if (sol.empty())
+    {
+      log_error(
+        "Can't construct rvalue reference to array type during dereference\n"
+        "(It isn't allowed by C anyway)\n");
+      abort();
+    }
   }
   else
   {

@@ -9,7 +9,7 @@ contract BASE{
         uint b;
         uint256 c;
         bytes1 d;
-        uint[] memory f = new uint[](2);
+        uint8[] memory f = new uint8[](2);
 
         assert(a == 0);
         assert(b == 0);

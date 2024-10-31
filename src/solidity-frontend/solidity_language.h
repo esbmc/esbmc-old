@@ -2,13 +2,14 @@
 #define SOLIDITY_FRONTEND_SOLIDITY_AST_LANGUAGE_H_
 
 #include <clang-c-frontend/clang_c_language.h>
+#include <clang-cpp-frontend/clang_cpp_language.h>
 #include <util/language.h>
 #include <fstream>
 #include <sstream>
 #include <nlohmann/json.hpp>
 #include <boost/filesystem.hpp>
 
-class solidity_languaget : public clang_c_languaget
+class solidity_languaget : public clang_cpp_languaget
 {
 public:
   solidity_languaget();
@@ -45,6 +46,9 @@ public:
 
   // smart contract source
   std::string smart_contract;
+
+  // for external verification
+  bool trust_mode;
 
   // store AST json in nlohmann::json data structure
   nlohmann::json src_ast_json_array = nlohmann::json::array();

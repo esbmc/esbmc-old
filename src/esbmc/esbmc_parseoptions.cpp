@@ -490,6 +490,15 @@ void esbmc_parseoptionst::get_command_line_options(optionst &options)
   if (cmdline.isset("cvc"))
     options.set_option("cvc4", true);
 
+  /*For Solidity Optimization*/
+  if (cmdline.isset("sol"))
+  {
+    // for mapping
+    options.set_option("force-malloc-success", true);
+    // no scanf in solidity
+    options.set_option("no-unlimited-scanf-check", true);
+  }
+
   config.options = options;
 }
 

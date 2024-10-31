@@ -1,4 +1,4 @@
 CORE
 contract.solast
---function setLarge --sol contract.sol
+--sol contract.sol --k-induction
 ^VERIFICATION SUCCESSFUL$

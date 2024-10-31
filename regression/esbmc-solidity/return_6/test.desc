@@ -1,4 +1,4 @@
 CORE
 contract.solast
---function test_return --sol contract.sol
+--contract call --sol contract.sol --k-induction
 ^VERIFICATION SUCCESSFUL$

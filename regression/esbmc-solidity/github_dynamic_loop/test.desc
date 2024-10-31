@@ -1,5 +1,5 @@
 CORE
 dynamic_array_oob_loop.solast
---function dyn_array_oob_loop --incremental-bmc --sol dynamic_array_oob_loop.sol
-.*line 11 function dyn_array_oob_loop$
+--incremental-bmc --sol dynamic_array_oob_loop.sol
+.*function dyn_array_oob_loop$
 ^VERIFICATION FAILED$

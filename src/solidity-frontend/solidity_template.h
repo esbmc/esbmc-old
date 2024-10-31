@@ -12,11 +12,13 @@ namespace SolidityTemplate
 {
 /// header & typedef
 const std::string sol_header = R"(
-#include <stddef.h>
-#include <stdlib.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdlib>
+#include <cstdint>
 #include <string.h>
-#include <stdbool.h>
+#include <string>
+#include <cstdbool>
+#include <cassert>
 )";
 
 /*
@@ -35,9 +37,9 @@ typedef unsigned _ExtInt(160) address_t;
 // the value of these variables need to be set to rand afterwards
 const std::string sol_msg = R"(
 uint256_t msg_data;
-address_t msg_sender;
+address_t msg_sender = (address_t)0;
 __uint32_t msg_sig;
-uint256_t msg_value;
+uint256_t msg_value = (uint256_t)1;
 )";
 
 const std::string sol_tx = R"(
@@ -66,7 +68,11 @@ uint256_t blockhash();
 )";
 
 const std::string gasleft = R"(
-uint256_t gasleft();
+uint256_t sol_gas = 100; // relatively large
+uint256_t gasleft()
+{
+  return sol_gas;
+}
 )";
 
 const std::string sol_abi = R"(
@@ -106,290 +112,146 @@ const std::string sol_byte = R"(
 void byte_concat();
 )";
 
-const std::string sol_funcs =
-  blockhash + gasleft + sol_abi + sol_math + sol_string + sol_byte;
+const std::string sol_address = R"(
+void addr_transfer(uint256_t ether, uint256_t balance)
+{
+  __ESBMC_assume(balance < ether);
+}
+
+bool addr_send(uint256_t ether, uint256_t balance)
+{
+  if(balance < ether)
+    return false;
+  return true;
+}
+
+bool addr_call()
+{
+  return nondet_bool();
+}
+
+bool addr_delegatecall()
+{
+  return nondet_bool();
+}
+
+bool addr_staticcall()
+{
+  return nondet_bool();
+}
+
+bool addr_callcodecall()
+{
+  return nondet_bool();
+}
+
+)";
+
+const std::string sol_funcs = blockhash + gasleft + sol_abi + sol_math +
+                              sol_string + sol_byte + sol_address;
 
 /// data structure
 
 /* https://github.com/rxi/map */
 const std::string sol_mapping = R"(
-struct map_node_t;
-typedef struct map_node_t map_node_t;
-
-int zero_int;
-unsigned int zero_uint;
-bool zero_bool;
-char *zero_string;
-
-typedef struct map_base_t
+struct NodeU
 {
-	map_node_t **buckets;
-	unsigned nbuckets, nnodes;
-} map_base_t;
+  uint256_t data : 256;
+  struct NodeU *next;
+};
 
-typedef struct map_iter_t
+struct NodeI
 {
-	unsigned bucketidx;
-	map_node_t *node;
-} map_iter_t;
+  int256_t data : 256;
+  struct NodeI *next;
+};
 
-typedef struct map_node_t
+void insertAtEndU(struct NodeU **head, uint256_t data)
 {
-	unsigned hash;
-	void *value;
-	map_node_t *next;
-} map_node_t;
-
-void *map_get_(map_base_t *m, const char *key);
-int map_set_(map_base_t *m, const char *key, void *value, int vsize);
-void map_remove_(map_base_t *m, const char *key);
-
-typedef struct map_int_t
-{
-	map_base_t base;
-	int *ref;
-	int tmp;
-} map_int_t;
-
-typedef struct map_uint_t
-{
-	map_base_t base;
-	unsigned int *ref;
-	unsigned int tmp;
-} map_uint_t;
-
-typedef struct map_string_t
-{
-	map_base_t base;
-	char **ref;
-	char *tmp;
-} map_string_t;
-
-typedef struct map_bool_t
-{
-	map_base_t base;
-	bool *ref;
-	bool tmp;
-} map_bool_t;
-
-/// Init
-void map_init_int(map_int_t *m)
-{
-	memset(m, 0, sizeof(*(m)));
+  struct NodeU *newNode = (struct NodeU *)malloc(sizeof(struct NodeU));
+  newNode->data = data;
+  newNode->next = NULL;
+  if (*head == NULL)
+  {
+    *head = newNode;
+    return;
+  }
+  struct NodeU *current = *head;
+  while (current->next != NULL)
+  {
+    current = current->next;
+  }
+  current->next = newNode;
 }
 
-void map_init_uint(map_uint_t *m)
+void insertAtEndI(struct NodeI **head, int256_t data)
 {
-	memset(m, 0, sizeof(*(m)));
+  struct NodeI *newNode = (struct NodeI *)malloc(sizeof(struct NodeI));
+  newNode->data = data;
+  newNode->next = NULL;
+  if (*head == NULL)
+  {
+    *head = newNode;
+    return;
+  }
+  struct NodeI *current = *head;
+  while (current->next != NULL)
+  {
+    current = current->next;
+  }
+  current->next = newNode;
 }
 
-void map_init_string(map_string_t *m)
+int findKeyU(struct NodeU *head, uint256_t key)
 {
-	memset(m, 0, sizeof(*(m)));
+  struct NodeU *current = head;
+  int cnt = 0;
+  while (current != NULL)
+  {
+    if (current->data == key)
+      return cnt;
+    cnt++;
+    current = current->next;
+  }
+  insertAtEndU(&head, key);
+  // temporary
+  if (cnt >= 50)
+    assert(0);
+  return cnt;
 }
 
-void map_init_bool(map_bool_t *m)
+int findKeyI(struct NodeI *head, int256_t key)
 {
-	memset(m, 0, sizeof(*(m)));
+  struct NodeI *current = head;
+  int cnt = 0;
+  while (current != NULL)
+  {
+    if (current->data == key)
+      return cnt;
+    cnt++;
+    current = current->next;
+  }
+  insertAtEndI(&head, key);
+  // temporary
+  if (cnt >= 50)
+    assert(0);
+  return cnt;
 }
+)";
 
-/// Set
-void map_set_int(map_int_t *m, const char *key, const int value)
+const std::string sol_array = R"(
+void *arrcpy(void *from_array, size_t from_size, size_t size_of)
 {
-	(m)->tmp = value;
-	map_set_(&(m)->base, key, &(m)->tmp, sizeof((m)->tmp));
-}
-void map_set_uint(map_uint_t *m, const char *key, const unsigned int value)
-{
-	(m)->tmp = value;
-	map_set_(&(m)->base, key, &(m)->tmp, sizeof((m)->tmp));
-}
-void map_set_string(map_string_t *m, const char *key, char *value)
-{
-	(m)->tmp = value;
-	map_set_(&(m)->base, key, &(m)->tmp, sizeof((m)->tmp));
-}
-void map_set_bool(map_bool_t *m, const char *key, const bool value)
-{
-	(m)->tmp = value;
-	map_set_(&(m)->base, key, &(m)->tmp, sizeof((m)->tmp));
-}
-
-/// Get
-int *map_get_int(map_int_t *m, const char *key)
-{
-	(m)->ref = map_get_(&(m)->base, key);
-	zero_int = 0;
-	return (m)->ref != NULL ? (m)->ref : &zero_int;
-}
-unsigned int *map_get_uint(map_uint_t *m, const char *key)
-{
-	(m)->ref = map_get_(&(m)->base, key);
-	zero_uint = 0;
-	return (m)->ref != NULL ? (m)->ref : &zero_uint;
-}
-char **map_get_string(map_string_t *m, const char *key)
-{
-	(m)->ref = map_get_(&(m)->base, key);
-	zero_string = "0";
-	return (m)->ref != NULL ? (m)->ref : &zero_string;
-}
-bool *map_get_bool(map_bool_t *m, const char *key)
-{
-	(m)->ref = map_get_(&(m)->base, key);
-	zero_bool = false;
-	return (m)->ref != NULL ? (m)->ref : &zero_bool;
-}
-
-/// General
-unsigned map_hash(const char *str)
-{
-	unsigned hash = 5381;
-	// avoid derefencing null ptr
-	if (str != NULL)
-		while (*str)
-		{
-			hash = ((hash << 5) + hash) ^ *str++;
-		}
-	return hash;
-}
-
-map_node_t *map_newnode(const char *key, void *value, int vsize)
-{
-	map_node_t *node;
-	int ksize = strlen(key) + 1;
-	int voffset = ksize + ((sizeof(void *) - ksize) % sizeof(void *));
-	node = malloc(sizeof(*node) + voffset + vsize);
-	if (!node)
-		return NULL;
-	memcpy(node + 1, key, ksize);
-	node->hash = map_hash(key);
-	node->value = ((char *)(node + 1)) + voffset;
-	memcpy(node->value, value, vsize);
-	return node;
-}
-
-int map_bucketidx(map_base_t *m, unsigned hash)
-{
-	return hash & (m->nbuckets - 1);
-}
-
-void map_addnode(map_base_t *m, map_node_t *node)
-{
-	int n = map_bucketidx(m, node->hash);
-	node->next = m->buckets[n];
-	m->buckets[n] = node;
-}
-
-int map_resize(map_base_t *m, int nbuckets)
-{
-	map_node_t *nodes, *node, *next;
-	map_node_t **buckets;
-	int i;
-	nodes = NULL;
-	i = m->nbuckets;
-	while (i--)
-	{
-		node = (m->buckets)[i];
-		while (node)
-		{
-			next = node->next;
-			node->next = nodes;
-			nodes = node;
-			node = next;
-		}
-	}
-	/* Reset buckets */
-	/* --force-malloc-success */
-	buckets = malloc(sizeof(*m->buckets) * nbuckets);
-	if (buckets != NULL)
-	{
-		m->buckets = buckets;
-		m->nbuckets = nbuckets;
-	}
-	if (m->buckets)
-	{
-		memset(m->buckets, 0, sizeof(*m->buckets) * m->nbuckets);
-		/* Re-add nodes to buckets */
-		node = nodes;
-		while (node)
-		{
-			next = node->next;
-			map_addnode(m, node);
-			node = next;
-		}
-	}
-	/* Return error code if realloc() failed */
-	/* --force-malloc-success */
-	return 0;
-}
-
-map_node_t **map_getref(map_base_t *m, const char *key)
-{
-	unsigned hash = map_hash(key);
-	map_node_t **next;
-	if (m->nbuckets > 0)
-	{
-		next = &m->buckets[map_bucketidx(m, hash)];
-		while (*next)
-		{
-			if ((*next)->hash == hash && !strcmp((char *)(*next + 1), key))
-			{
-				return next;
-			}
-			next = &(*next)->next;
-		}
-	}
-	return NULL;
-}
-
-void *map_get_(map_base_t *m, const char *key)
-{
-	map_node_t **next = map_getref(m, key);
-	return next ? (*next)->value : NULL;
-}
-
-int map_set_(map_base_t *m, const char *key, void *value, int vsize)
-{
-	int n, err;
-	map_node_t **next, *node;
-	next = map_getref(m, key);
-	if (next)
-	{
-		memcpy((*next)->value, value, vsize);
-		return 0;
-	}
-	node = map_newnode(key, value, vsize);
-	if (node == NULL)
-		return -1;
-	if (m->nnodes >= m->nbuckets)
-	{
-		n = (m->nbuckets > 0) ? (m->nbuckets << 1) : 1;
-		err = map_resize(m, n);
-		if (err)
-			return -1;
-	}
-	map_addnode(m, node);
-	m->nnodes++;
-	return 0;
-}
-
-void map_remove_(map_base_t *m, const char *key)
-{
-	map_node_t *node;
-	map_node_t **next = map_getref(m, key);
-	if (next)
-	{
-		node = *next;
-		*next = (*next)->next;
-		free(node);
-		m->nnodes--;
-	}
+  assert(from_size != 0);
+  void *to_array = (void *)calloc(from_size, size_of);
+  memcpy(to_array, from_array, from_size * size_of);
+  return to_array;
 }
 )";
 
 /// external library
 // itoa
+/* 
 const std::string sol_itoa = R"(
 char get_char(int digit)
 {
@@ -469,12 +331,191 @@ char *u256toa(uint256_t value)
 	return str;
 }
 )";
+*/
 
-const std::string sol_ext_library = sol_itoa;
+// string2hex
+const std::string sol_str2hex = R"(
+static const long hextable[] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, -1, -1, -1, -1, -1, -1, -1, 10, 11, 12, 13, 14, 15, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+char *decToHexa(int n)
+{
+    char *hexaDeciNum = (char *)malloc(256 * sizeof(char));
+    hexaDeciNum[0] = '\0';
+    int i = 0;
+    while (n != 0)
+    {
+        int temp = 0;
+        temp = n % 16;
+        if (temp < 10)
+        {
+            hexaDeciNum[i] = temp + 48;
+            i++;
+        }
+        else
+        {
+            hexaDeciNum[i] = temp + 55;
+            i++;
+        }
+
+        n /= 16;
+    }
+    char *ans = (char *)malloc(256 * sizeof(char));
+    ans[0] = '\0';
+    int pos = 0;
+    for (int j = i - 1; j >= 0; j--)
+    {
+        ans[pos] = (char)hexaDeciNum[j];
+        pos++;
+    }
+    ans[pos] = '\0';
+    return ans;
+}
+char *ASCIItoHEX(const char *ascii)
+{
+    char *hex = (char *)malloc(256 * sizeof(char));
+    hex[0] = '\0';
+    for (int i = 0; i < strlen(ascii); i++)
+    {
+        char ch = ascii[i];
+        int tmp = (int)ch;
+        char *part = decToHexa(tmp);
+        strcat(hex, part);
+    }
+    return hex;
+}
+uint256_t hexdec(const char *hex)
+{
+    /*https://stackoverflow.com/questions/10324/convert-a-hexadecimal-string-to-an-integer-efficiently-in-c*/
+    uint256_t ret = 0;
+    while (*hex && ret >= (uint256_t)0)
+    {
+        ret = (ret << (uint256_t)4) | (uint256_t)hextable[*hex++];
+    }
+    return ret;
+}
+uint256_t str2int(const char *str)
+{
+    return hexdec(ASCIItoHEX(str));
+}
+)";
+
+// get unique random address
+const std::string sol_uqAddr = R"(
+// compromise:
+// - define a relatively large array
+static const unsigned int max_addr_obj_size = 50;
+static address_t sol_addr_array[max_addr_obj_size];
+static void *sol_obj_array[max_addr_obj_size];
+static char* sol_cname_array[max_addr_obj_size];
+static unsigned sol_max_cnt = 0;
+
+int get_addr_array_idx(address_t tgt)
+{
+  for (unsigned int i = 0; i < sol_max_cnt; i++)
+  {
+    if ((address_t)sol_addr_array[i] == (address_t)tgt)
+      return i;
+  }
+  return -1;
+}
+void *get_obj(address_t addr)
+{
+  int idx = get_addr_array_idx(addr);
+  if (idx == -1)
+    // this means it's not previously stored
+    return NULL;
+  else
+    return sol_obj_array[idx];
+}
+void update_addr_obj(address_t addr, void *obj)
+{
+  __ESBMC_assume(obj != NULL);
+  sol_addr_array[sol_max_cnt] = addr;
+  sol_obj_array[sol_max_cnt] = obj;
+  ++sol_max_cnt;
+  if (sol_max_cnt >= max_addr_obj_size)
+    assert(0);
+}
+address_t get_unique_address(void *obj)
+{
+  __ESBMC_assume(obj != NULL);
+  address_t tmp;
+  do
+  {
+    tmp = nondet_long();
+  } while (get_addr_array_idx(tmp) != -1);
+  update_addr_obj(tmp, obj);
+  return tmp;
+}
+void set_cname_array(address_t _addr, char* cname)
+{
+  int tmp = get_addr_array_idx(_addr);
+  assert(tmp != -1);
+  sol_cname_array[tmp] = cname;
+}
+const char * get_cname(address_t _addr)
+{
+  int tmp = get_addr_array_idx(_addr);
+  assert(tmp != -1);
+  return sol_cname_array[tmp];
+}
+bool cmp_cname(const char* c_1, const char* c_2)
+{
+  if(strcmp(c_1, c_2) == 0)
+    return true;
+  else
+    return false;
+}
+
+uint256_t update_balance(uint256_t balance, uint256_t val)
+{
+  val = val + (uint256_t)1;
+  if(balance >= val)
+    balance -= val;
+  else
+    balance = (uint256_t)0;
+  return balance;
+}
+)";
+
+const std::string sol_ext_library = sol_str2hex + sol_uqAddr;
+
+const std::string sol_c_library = "extern \"C\" {" + sol_typedef + sol_vars +
+                                  sol_funcs + sol_mapping + sol_array +
+                                  sol_ext_library + "}";
+
+// For C++
+const std::string sol_cpp_string = R"(
+const std::string empty_str = "";
+void _streq(std::string &str1, std::string str2)
+{
+  __ESBMC_assume(!str2.empty());
+  str1 = str2;
+}
+std::string _tostr(const char* ptr)
+{
+  return std::string(ptr);
+}
+const char* _tochar(std::string str)
+{
+  return str.c_str();
+}
+)";
+
+const std::string sol_cpp_library = sol_cpp_string;
 
 // combination
-const std::string sol_library = sol_header + sol_typedef + sol_vars +
-                                sol_funcs + sol_mapping + sol_ext_library;
+const std::string sol_library = sol_header + sol_c_library + sol_cpp_library;
 
 }; // namespace SolidityTemplate
 
