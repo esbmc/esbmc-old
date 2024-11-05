@@ -1,4 +1,4 @@
 FUTURE
 contract.solast
---sol contract.sol --k-induction
+--sol contract.sol --k-induction  --base-k-step 2
 ^VERIFICATION SUCCESSFUL$
