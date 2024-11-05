@@ -7557,16 +7557,14 @@ static inline void static_lifetime_init(const contextt &context, codet &dest)
   dest = code_blockt();
 
   // call designated "initialization" functions
-  context.foreach_operand_in_order(
-    [&dest](const symbolt &s)
+  context.foreach_operand_in_order([&dest](const symbolt &s) {
+    if (s.type.initialization() && s.type.is_code())
     {
-      if (s.type.initialization() && s.type.is_code())
-      {
-        code_function_callt function_call;
-        function_call.function() = symbol_expr(s);
-        dest.move_to_operands(function_call);
-      }
-    });
+      code_function_callt function_call;
+      function_call.function() = symbol_expr(s);
+      dest.move_to_operands(function_call);
+    }
+  });
 }
 
 void solidity_convertert::get_aux_array_name(
