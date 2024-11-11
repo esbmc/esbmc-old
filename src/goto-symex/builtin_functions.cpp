@@ -608,6 +608,26 @@ void goto_symext::symex_cpp_delete(const expr2tc &expr)
 
   expr2tc tmp = code.operand;
 
+  if (is_member2t(tmp))
+  {
+    internal_deref_items.clear();
+
+    member2t m = to_member2t(tmp);
+    expr2tc source = m.source_value;
+    dereference(source, dereferencet::INTERNAL);
+    expr2tc obj = internal_deref_items.front().object;
+    irep_idt name;
+    if (is_symbol2t(obj))
+    {
+      name = to_symbol2t(obj).thename;
+      const symbolt *s = ns.get_context().find_symbol(name);
+      name = s->name;
+
+      if (has_prefix(name, "tmp$"))
+        return;
+    }
+  }
+
   internal_deref_items.clear();
   expr2tc deref = dereference2tc(get_empty_type(), tmp);
   dereference(deref, dereferencet::INTERNAL);
