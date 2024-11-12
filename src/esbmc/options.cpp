@@ -44,6 +44,7 @@ const struct group_opt_templ all_cmd_options[] = {
      NULL,
      "do not print unwinding information during symbolic execution"},
     {"compact-trace", NULL, ""},
+    {"simplified-trace", NULL, "print a simplified version of the trace"},
     {"symex-trace", NULL, "print instructions during symbolic execution"},
     {"ssa-trace", NULL, "print SSA during SMT encoding"},
     {"ssa-smt-trace", NULL, "print generated SMT during SMT encoding"},
