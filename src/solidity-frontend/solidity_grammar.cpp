@@ -165,7 +165,7 @@ TypeNameT get_type_name_t(const nlohmann::json &type_name)
     {
       return MappingTypeName;
     }
-    else if (typeIdentifier.find("t_array$") != std::string::npos)
+    else if (typeIdentifier.compare(0, 8, "t_array$") == 0)
     {
       // Solidity's array type description is like:
       //  "typeIdentifier": "t_array$_t_uint8_$2_memory_ptr",
@@ -190,6 +190,10 @@ TypeNameT get_type_name_t(const nlohmann::json &type_name)
 
       return ArrayTypeName;
     }
+    else if (typeIdentifier.compare(0, 9, "t_struct$") == 0)
+    {
+      return StructTypeName;
+    }
     else if (
       uint_string_to_type_map.count(typeString) ||
       int_string_to_type_map.count(typeString) || typeString == "bool" ||
@@ -208,10 +212,6 @@ TypeNameT get_type_name_t(const nlohmann::json &type_name)
     else if (typeIdentifier.find("t_contract$") != std::string::npos)
     {
       return ContractTypeName;
-    }
-    else if (typeIdentifier.find("t_struct$") != std::string::npos)
-    {
-      return StructTypeName;
     }
     else if (typeString.find("type(") != std::string::npos)
     {

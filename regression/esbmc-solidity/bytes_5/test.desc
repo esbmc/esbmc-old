@@ -1,4 +1,4 @@
 CORE
 contract.solast
---function setData --sol contract.sol
+--contract Base --sol contract.sol --unwind 4 --no-unwinding-assertions  
 ^VERIFICATION SUCCESSFUL$

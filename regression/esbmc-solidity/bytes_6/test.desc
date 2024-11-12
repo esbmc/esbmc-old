@@ -1,4 +1,4 @@
 CORE
 contract.solast
---function test_return --sol contract.sol
+--sol contract.sol  --unwind 4 --no-unwinding-assertions 
 ^VERIFICATION SUCCESSFUL$

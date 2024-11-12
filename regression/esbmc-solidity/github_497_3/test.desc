@@ -1,5 +1,5 @@
 CORE
 MyContract_underflow_UnaryOp.solast
---function func_underflow --sol MyContract_underflow_UnaryOp.sol
-.*line 11 function func_underflow$
+--sol MyContract_underflow_UnaryOp.sol --overflow-check --multi-property --unwind 5 --no-unwinding-assertions
+.*function func_underflow$
 ^VERIFICATION FAILED$

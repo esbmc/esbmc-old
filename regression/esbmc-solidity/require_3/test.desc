@@ -1,4 +1,4 @@
 CORE
 contract.solast
---sol contract.sol --contract Robot --function test2 --unwind 3 --no-unwinding-assertions
+--sol contract.sol --contract Robot --k-induction
 ^VERIFICATION SUCCESSFUL$

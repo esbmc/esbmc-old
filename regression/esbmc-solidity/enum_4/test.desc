@@ -1,0 +1,4 @@
+CORE
+contract.solast
+--sol contract.sol --k-induction --no-pointer-check
+^VERIFICATION SUCCESSFUL$

@@ -6,7 +6,7 @@ contract BASE {
     uint b;
     uint256 c;
     bytes1 d;
-    uint[] f = new uint[](2);
+    uint8[] f = new uint8[](2);
 
     function test() public view {
         assert(a == 0);

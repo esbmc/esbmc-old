@@ -1,0 +1,4 @@
+CORE
+contract.solast
+--sol contract.sol --unwind 10 --no-unwinding-assertions
+^VERIFICATION SUCCESSFUL$

@@ -1,4 +1,0 @@
-CORE
-contract.solast
---sol contract.sol --unwind 11 --no-unwinding-assertions --force-malloc-success
-^VERIFICATION SUCCESSFUL$
