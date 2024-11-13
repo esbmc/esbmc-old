@@ -272,7 +272,7 @@ def get_command_line(strat, prop, arch, benchmark, concurrency, dargs, esbmc_ci)
   if prop == Property.overflow:
     command_line += "--no-pointer-check --no-bounds-check --overflow-check --no-assertions "
   elif prop == Property.memory:
-    command_line += "--no-reachable-memory-leak --no-assertions --conv-assert-to-assume "
+    command_line += "--memory-leak-check --no-reachable-memory-leak --no-assertions --conv-assert-to-assume "
     # It seems SV-COMP doesn't want to check for memleaks on abort()
     # see also <https://github.com/esbmc/esbmc/issues/1259>
     command_line += "--no-abnormal-memory-leak "
