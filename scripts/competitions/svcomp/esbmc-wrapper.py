@@ -272,7 +272,7 @@ def get_command_line(strat, prop, arch, benchmark, concurrency, dargs, esbmc_ci)
   if prop == Property.overflow:
     command_line += "--no-pointer-check --no-bounds-check --overflow-check --no-assertions "
   elif prop == Property.memory:
-    command_line += "--no-reachable-memory-leak --no-assertions --no-pointer-check --no-bounds-check "
+    command_line += "--no-reachable-memory-leak --no-assertions --conv-assert-to-assume "
     # It seems SV-COMP doesn't want to check for memleaks on abort()
     # see also <https://github.com/esbmc/esbmc/issues/1259>
     command_line += "--no-abnormal-memory-leak "
@@ -285,9 +285,9 @@ def get_command_line(strat, prop, arch, benchmark, concurrency, dargs, esbmc_ci)
   elif prop == Property.reach:
     command_line += "--enable-unreachability-intrinsic "
     if concurrency:
-      command_line += "--no-pointer-check --no-bounds-check "
+      command_line += "--conv-assert-to-assume "
     else:
-      command_line += "--no-pointer-check --interval-analysis --no-bounds-check --error-label ERROR --goto-unwind --unlimited-goto-unwind "
+      command_line += "--conv-assert-to-assume --interval-analysis --error-label ERROR --goto-unwind --unlimited-goto-unwind "
   elif prop == Property.datarace:
     # TODO: can we do better in case 'concurrency == False'?
     command_line += "--no-pointer-check --no-bounds-check --data-races-check --no-assertions "
