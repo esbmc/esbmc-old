@@ -532,7 +532,8 @@ void goto_convertt::generate_dynamic_size_vla(
   /* these constraints are pointless with --ir as they'll be thrown away during
    * smt-conv anyway, but let's keep the "int-encoding" option for the backends
    * only */
-  auto assert_not = [&](irep_idt op_id, const exprt &e) {
+  auto assert_not = [&](irep_idt op_id, const exprt &e)
+  {
     if (disable_check)
       return;
 
@@ -1039,9 +1040,8 @@ unsigned int goto_convertt::get_expr_number_globals(const expr2tc &expr)
 
   unsigned int globals = 0;
 
-  expr->foreach_operand([this, &globals](const expr2tc &e) {
-    globals += get_expr_number_globals(e);
-  });
+  expr->foreach_operand([this, &globals](const expr2tc &e)
+                        { globals += get_expr_number_globals(e); });
 
   return globals;
 }
@@ -1556,9 +1556,11 @@ void goto_convertt::convert_return(
   {
     if (!new_code.has_return_value())
     {
+#if 0
       code.dump();
       log_error("function must return value");
       abort();
+#endif
     }
 
     // Now add a return node to set the return value.

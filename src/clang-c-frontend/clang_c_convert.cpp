@@ -1319,6 +1319,24 @@ bool clang_c_convertert::get_type(const clang::Type &the_type, typet &new_type)
     break;
   }
 
+  case clang::Type::Complex:
+  {
+    const clang::ComplexType &c =
+      static_cast<const clang::ComplexType &>(the_type);
+    typet the_type;
+    if (get_type(c.getElementType(), the_type))
+      return true;
+
+    new_type = vector_typet(
+      the_type,
+      constant_exprt(
+        integer2binary(2, bv_width(int_type())),
+        integer2string(2),
+        int_type()));
+
+    break;
+  }
+
   default:
     std::ostringstream oss;
     llvm::raw_os_ostream ross(oss);
@@ -1424,6 +1442,8 @@ bool clang_c_convertert::get_builtin_type(
     break;
 
   case clang::BuiltinType::Half:
+  case clang::BuiltinType::Float16:
+  case clang::BuiltinType::BFloat16:
     new_type = half_float_type();
     c_type = "_Float16";
     break;
@@ -2110,6 +2130,20 @@ bool clang_c_convertert::get_expr(const clang::Stmt &stmt, exprt &new_expr)
     fake_call.function() = symbol_exprt("c:@F@__ESBMC_shufflevector", t);
     fake_call.function().name("__ESBMC_shufflevector");
     new_expr.swap(fake_call);
+    return false;
+  }
+
+  // Casting from compiler intrinsics such as _Complex
+  case clang::Stmt::BuiltinBitCastExprClass:
+  {
+    const clang::BuiltinBitCastExpr &cast =
+      static_cast<const clang::BuiltinBitCastExpr &>(stmt);
+
+    typet t;
+    if (get_type(cast.getType(), t))
+      return true;
+
+    new_expr = gen_zero(t);
     return false;
   }
 
