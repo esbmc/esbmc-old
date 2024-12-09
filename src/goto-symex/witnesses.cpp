@@ -903,8 +903,16 @@ void generate_testcase(
   test_case
     << R"(<!DOCTYPE testcase PUBLIC "+//IDN sosy-lab.org//DTD test-format testcase 1.1//EN" "https://sosy-lab.org/test-format/testcase-1.1.dtd">)"
     << "\n";
-  test_case << R"(<testcase>)"
-            << "\n";
+  if(config.options.get_bool_option("condition-coverage") || config.options.get_bool_option("branch-coverage") )
+  {
+    test_case << R"(<testcase>)"
+              << "\n";
+  }
+  else
+  {
+        test_case << R"(<testcase coversError="true">)"
+              << "\n";
+  }
 
   // We should only show the symbol one time
   std::unordered_set<std::string> nondet;
