@@ -29,6 +29,52 @@ if(BENCHBRINGUP)
   set(BENCHBRINGUP_ARGS --timeout=$ENV{TEST_TIMEOUT} --benchbringup)
 endif()
 
+# Let's do CMake "maps"
+set(map_extensions_.c "C")
+set(map_extensions_.i "C")
+set(map_extensions_.cpp "C++")
+set(map_extensions_.cu "CUDA")
+set(map_extensions_.solast "Solidity")
+set(map_extensions_.jimple "Jimple")
+set(map_extensions_.goto "GOTO")
+set(map_extensions_.py "Python")
+
+set(map_flags_--z3 "Z3")
+set(map_flags_--mathsat "MathSAT")
+set(map_flags_--cvc "CVC")
+set(map_flags_--boolector "Boolector")
+set(map_flags_--bitwuzla "Bitwuzla")
+set(map_flags_--incremental-bmc "Incremental-BMC")
+set(map_flags_--k-induction "k-Induction")
+set(map_flags_--k-induction-parallel "k-Induction")
+set(map_flags_--gcse "Optimization")
+set(map_flags_--interval-analysis "Optimization")
+
+function(add_test_tags test_desc_path test_name folder)
+  # Note: I tried using python for this. It made the configuration take minutes.
+  # Not sure if this slowness is due to my python skills or from using stdout as a communication
+  # layer. With CMake it, takes 5s.
+
+  set(TAGS "regression;${folder}")  
+  file(STRINGS ${test_desc_path} TEST_DESC)
+  list(GET TEST_DESC 0 MODE)
+  list(GET TEST_DESC 1 FILE_NAME)
+  list(GET TEST_DESC 2 ARGUMENTS)
+
+  list(APPEND TAGS ${MODE})
+
+  # BUG: For some reason, CMake considers whitespace and multiple "." as part of the extension
+  # this means that ".c " and ".magic.c" might be returned. This /might/ be solved in the latest
+  # versions (starting with 3.20, CMake has the cmake_path command)
+  get_filename_component(FILE_EXT ${FILE_NAME} EXT)
+  list(APPEND TAGS ${map_extensions_${FILE_EXT}})
+  foreach(arg ${ARGUMENTS})
+    list(APPEND TAGS ${map_flags_${arg}})
+  endforeach()
+  set_tests_properties(${test_name}
+    PROPERTIES LABELS "${TAGS}")
+endfunction()
+
 function(add_esbmc_regression_test folder modes test)
     set(test_name "regression/${folder}/${test}")
     add_test(NAME ${test_name}
@@ -38,10 +84,11 @@ function(add_esbmc_regression_test folder modes test)
                      --modes ${modes}
                      --file=${test}
                      ${BENCHBRINGUP_ARGS}) # additional args for BENCHBRINGUP workflow
-    # TODO: Testing Tool should have a command to dump the TAG of a test		   
+
+    add_test_tags(${CMAKE_CURRENT_SOURCE_DIR}/${folder}/${test}/test.desc ${test_name} ${folder})
+  
     set_tests_properties(${test_name}
-      PROPERTIES SKIP_RETURN_CODE 10
-      LABELS "regression;${folder}")
+      PROPERTIES SKIP_RETURN_CODE 10)
 endfunction()
 
 function(add_esbmc_regression folder modes)
