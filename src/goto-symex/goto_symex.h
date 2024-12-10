@@ -942,6 +942,8 @@ protected:
 
   void rename(expr2tc &expr) override;
 
+  expr2tc constant_propagation(expr2tc &expr);
+
   void
   dump_internal_state(const std::list<struct internal_item> &data) override;
   bool is_live_variable(const expr2tc &sym) override;
