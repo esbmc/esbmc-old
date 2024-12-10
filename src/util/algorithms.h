@@ -114,4 +114,16 @@ public:
   {
   }
 };
+
+/**
+ * @brief Base interface for ssa-step algorithms
+ */
+class expr2tc_algorithm : public algorithm<expr2tc>
+{
+public:
+  explicit expr2tc_algorithm(bool sideffect) : algorithm(sideffect)
+  {
+  }
+};
+
 #endif //ESBMC_ALGORITHM_H

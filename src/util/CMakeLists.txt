@@ -6,6 +6,10 @@ target_include_directories(algorithms
 add_library(cache cache.cpp)
 target_link_libraries(cache algorithms)
 
+add_library(green_reordering green_reordering.cpp)
+target_link_libraries(green_reordering algorithms)
+
+
 add_library(filesystem filesystem.cpp)
 target_include_directories(filesystem
     PRIVATE ${Boost_INCLUDE_DIRS}
