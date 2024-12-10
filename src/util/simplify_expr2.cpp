@@ -435,6 +435,38 @@ static type2tc common_arith_op2_type(expr2tc &e, expr2tc &f)
 
 expr2tc add2t::do_simplify() const
 {
+  auto Side_1 = side_1;
+  auto Side_2 = side_2;
+
+  // X + X --> X << 1
+  if(is_symbol2t(side_1) && is_symbol2t(side_2))
+    if(side_1 == side_2)
+      return shl2tc(type, side_1, from_integer(1, type));
+
+  // X + ~X -> -1
+  if(is_symbol2t(Side_1) && is_bitnot2t(Side_2))
+    std::swap(Side_1, Side_2);
+
+  // ~X + X -> -1
+  if(is_bitnot2t(Side_1) && is_symbol2t(Side_2))
+  {
+    if(to_symbol2t(Side_1) == to_symbol2t(to_bitnot2t(Side_2).value))
+      return constant_int2tc(Side_1->type, -1);
+  }
+
+  // X+0 -> X
+  // 0+X -> X
+
+  if(
+    is_sub2t(Side_1) && is_constant_int2t(Side_2) &&
+    to_constant_int2t(Side_2).value == 0)
+    std::swap(Side_1, Side_2);
+
+  if(
+    is_add2t(Side_1) && is_constant_int2t(Side_2) &&
+    to_constant_int2t(Side_2).value == 0)
+    return Side_1;
+
   expr2tc res = simplify_arith_2ops<Addtor, add2t>(type, side_1, side_2);
   if (!is_nil_expr(res))
     return res;
