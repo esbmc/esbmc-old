@@ -231,6 +231,8 @@ esbmc_dargs += "--no-align-check --k-step 2 --floatbv --unlimited-k-steps "
 # <https://github.com/esbmc/esbmc/pull/1190#issuecomment-1637047028>
 esbmc_dargs += "--no-vla-size-check "
 
+# Set BW as the default solver
+esbmc_dargs += "--bitwuzla "
 
 import re
 def check_if_benchmark_contains_pthread(benchmark):
