@@ -115,12 +115,13 @@ void jimple_method::from_json(const json &j)
     get_hash_name(); // to handle polymorphism, the method will have an uuid based on its type and arguments
   try
   {
-    j.at("throws").get_to(this->throws);
+    // j.at("throws").get_to(this->throws);
   }
   catch (std::exception &e)
   {
     this->throws = "(No throw)";
   }
+  this->throws = "(No throw)";
 
   // TODO: Empty body
   auto j_body = j.at("content");

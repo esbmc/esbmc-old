@@ -158,12 +158,26 @@ exprt jimple_file::to_exprt(contextt &ctx) const
   t.set("width", total_size);
   added_symbol->type = t;
 
+  // TODO: This is the most horrible hack that i've ever done
   // Add the methods and definitions
   for (auto const &field : body)
   {
     if (!std::dynamic_pointer_cast<jimple_class_field>(field))
     {
-      field->to_exprt(ctx, name, name);
+      auto func = std::dynamic_pointer_cast<jimple_method>(field);
+      if (func->name.find("onCreate") != std::string::npos)
+        field->to_exprt(ctx, name, name);
+    }
+  }
+
+  // Add the methods and definitions
+  for (auto const &field : body)
+  {
+    if (!std::dynamic_pointer_cast<jimple_class_field>(field))
+    {
+      auto func = std::dynamic_pointer_cast<jimple_method>(field);
+      if (func->name.find("onCreate") == std::string::npos)
+        field->to_exprt(ctx, name, name);
     }
   }
   return e;

@@ -1,4 +1,5 @@
 #include <jimple-frontend/AST/jimple_expr.h>
+#include <jimple-frontend/AST/jimple_globals.h>
 #include <util/arith_tools.h>
 #include <util/c_typecast.h>
 #include <util/c_types.h>
@@ -32,6 +33,10 @@ exprt jimple_symbol::to_exprt(
   const std::string &function_name) const
 {
   // 1. Look over the local scope
+  if (var_name == "null")
+  {
+    return gen_zero(int_type());
+  }
   auto symbol_name = get_symbol_name(class_name, function_name, var_name);
   symbolt &s = *ctx.find_symbol(symbol_name);
 
@@ -71,7 +76,13 @@ std::shared_ptr<jimple_expr> jimple_expr::get_expression(const json &j)
 
   if (expr_type == "class_reference")
   {
-    jimple_constant c("-1");
+    std::string key;
+    j.at("value").get_to(key);
+    std::ostringstream oss;
+    // TODO: this is not ok
+    oss << jimple::get_reference(key);
+    jimple_constant c(oss.str());
+    jimple::class_reference.push_back(key);
     return std::make_shared<jimple_constant>(c);
   }
 
@@ -158,7 +169,6 @@ std::shared_ptr<jimple_expr> jimple_expr::get_expression(const json &j)
     return std::make_shared<jimple_virtual_member>(c);
   }
 
-  log_error("Unexpected expr type: {}", expr_type);
   abort();
 }
 
@@ -216,6 +226,8 @@ exprt jimple_lengthof::to_exprt(
   const std::string &function_name) const
 {
   auto expr = from->to_exprt(ctx, class_name, function_name);
+  auto tmp_symbol = get_temp_symbol(uint_type(), class_name, function_name);
+  symbolt &tmp_added_symbol = *ctx.move_symbol_to_context(tmp_symbol);
 
   // Create a function call for allocation
   code_function_callt call;
@@ -292,14 +304,49 @@ exprt jimple_expr_invoke::to_exprt(
   }
 
   // TODO: Move intrinsics to backend
-  if (base_class == "java.lang.Integer" && method == "valueOf_1")
-    // This would be called with valueOf(2), valueOf(42), etc...
-    return parameters[0]->to_exprt(ctx, class_name, function_name);
+  if (base_class == "android.content.Intent")
+  {
+    code_skipt skip;
+    return skip;
+  }
+
+  if (method == "inflate_1")
+  {
+    code_skipt skip;
+    return skip;
+  }
+
+  if (method == "getRoot_1")
+  {
+    code_skipt skip;
+    return skip;
+  }
+
+  bool is_parse_int =
+    (base_class == "java.lang.Integer") && (method == "parseInt_1");
+  if (is_parse_int)
+  {
+    code_blockt block;
+    exprt rhs = exprt("sideeffect", int_type());
+    rhs.statement("nondet");
+    code_assignt assign(lhs, rhs);
+    block.operands().push_back(assign);
+    return block;
+  }
+
+  if (method == "isChecked_1")
+  {
+    code_blockt block;
+    exprt rhs = exprt("sideeffect", uint_type());
+    rhs.statement("nondet");
+    block.operands().push_back(rhs);
+    return block;
+  }
 
   if (is_nondet_call())
   {
-    jimple_nondet nondet(method);
-    return nondet.to_exprt(ctx, class_name, function_name);
+    code_skipt skip;
+    return skip;
   }
 
   code_blockt block;
@@ -375,6 +422,59 @@ exprt jimple_virtual_invoke::to_exprt(
     return skip;
   }
 
+  // TODO: Move intrinsics to backend
+  if (base_class == "android.widget.EditText")
+  {
+    code_skipt skip;
+    return skip;
+  }
+
+  if (base_class == "java.lang.Object")
+  {
+    code_skipt skip;
+    return skip;
+  }
+
+  if (method == "getLayoutInflater_1")
+  {
+    code_skipt skip;
+    return skip;
+  }
+
+  if (method == "inflate_1")
+  {
+    code_skipt skip;
+    return skip;
+  }
+
+  if (method == "getRoot_1")
+  {
+    code_skipt skip;
+    return skip;
+  }
+
+  if (method == "setContentView_2")
+  {
+    code_skipt skip;
+    return skip;
+  }
+
+  if (method == "findViewById_2")
+  {
+    code_skipt skip;
+    return skip;
+  }
+
+  if (method == "isChecked_1")
+  {
+    code_blockt block;
+    exprt rhs = exprt("sideeffect", int_type());
+    rhs.statement("nondet");
+    code_assignt assign(lhs, rhs);
+    block.operands().push_back(assign);
+    return block;
+  }
+
   if (is_nondet_call())
   {
     jimple_nondet nondet(method);
@@ -424,6 +524,8 @@ exprt jimple_virtual_invoke::to_exprt(
   return block;
 }
 
+#include <iostream>
+
 exprt jimple_newarray::to_exprt(
   contextt &ctx,
   const std::string &class_name,
@@ -443,6 +545,16 @@ exprt jimple_newarray::to_exprt(
 
   if (alloc_type.is_nil())
     alloc_type = char_type();
+
+  /*
+  if(alloc_type.id() == "symbol")
+    alloc_type = ns.follow(alloc_type);
+*/
+  if (alloc_size.type() != uint_type())
+  {
+    //alloc_size.make_typecast(uint_type());
+    //simplify(alloc_size);
+  }
 
   // Create a function call for allocation
   code_function_callt call;
@@ -511,7 +623,7 @@ exprt jimple_nondet::to_exprt(
   const std::string &,
   const std::string &) const
 {
-  auto type = int_type(); // TODO: hashmap here!
+  auto type = char_type(); // TODO: hashmap here!
   exprt rhs = exprt("sideeffect", type);
   rhs.statement("nondet");
 
@@ -572,14 +684,26 @@ void jimple_virtual_member::from_json(const json &j)
   j.at("signature").at("type").get_to(t);
   type = std::make_shared<jimple_type>(t);
 }
-
+#include <iostream>
 exprt jimple_virtual_member::to_exprt(
   contextt &ctx,
   const std::string &class_name,
   const std::string &function_name) const
 {
   auto result = gen_zero(type->to_typet(ctx));
-  auto struct_type = (*ctx.find_symbol("tag-" + from)).type;
+  // Fix this
+  if (from == "com.example.jimplebmc.databinding.ActivityMainBinding")
+    return result;
+
+  if (from.find(".databinding.") != std::string::npos)
+    return result;
+
+  auto inner_symbol = ctx.find_symbol("tag-" + from);
+  if (!inner_symbol)
+  {
+    throw fmt::format("Unsupported virtual member: {}", from);
+  }
+  auto struct_type = (*inner_symbol).type;
 
   // 1. Look over the local scope
   auto symbol_name = get_symbol_name(class_name, function_name, variable);
