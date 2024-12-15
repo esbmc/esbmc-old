@@ -107,7 +107,7 @@ jobs:
     needs: build-unix
     steps:
       - name: Setup SV-Benchmarks version
-        run: cd $HOME/sv-benchmarks && git fetch --all --tags && git checkout ${{ inputs.svbenchmarks }} && if [ "${{ inputs.svbenchmarks }}" == "main" ]; then git reset --hard origin/main; fi
+        run: cd $HOME/sv-benchmarks && git fetch --all --tags --force && git checkout ${{ inputs.svbenchmarks }} && if [ "${{ inputs.svbenchmarks }}" == "main" ]; then git reset --hard origin/main; fi
       - name: Download Linux Build
         uses: actions/download-artifact@v4
         with:
