@@ -614,7 +614,7 @@ void clang_cpp_convertert::add_vtable_variable_symbols(
         switch_map.find(compo.get("virtual_name").as_string());
       assert(cit2 != switch_map.end());
       const exprt &value = cit2->second;
-      assert(value.type().id() == compo.type().id());
+      assert(value.type() == compo.type());
       values.operands().push_back(value);
     }
     vt_symb_var.value = values;
