@@ -162,42 +162,32 @@ bool reachability_treet::step_next_state()
 unsigned int
 reachability_treet::decide_ileave_direction(execution_statet &ex_state)
 {
-  auto is_thread_schedulable = [&](int tid) {
-    return check_thread_viable(tid, true) && ex_state.dfs_explore_thread(tid);
-  };
+  unsigned int tid = 0, user_tid = 0;
 
-  signed int tid = 0, user_tid = 0;
-
-  // Get thread ID from user if interactive mode is enabled
-  tid = get_cur_state().active_thread + 1;
   if (interactive_ileaves)
   {
     tid = get_ileave_direction_from_user();
     user_tid = tid;
   }
 
-  // Try finding a schedulable thread in the forward direction
-  for (; tid < (int)ex_state.threads_state.size(); ++tid)
+  for (; tid < ex_state.threads_state.size(); tid++)
   {
-    if (is_thread_schedulable(tid))
-      break;
+    /* For all threads: */
+    if (!check_thread_viable(tid, true))
+      continue;
+
+    if (!ex_state.dfs_explore_thread(tid))
+      continue;
+
+#if 0
+    //apply static partial-order reduction
+    if (por && !ex_state.is_thread_mpor_schedulable(tid))
+      continue;
+#endif
+
+    break;
   }
 
-  // If no thread was found, search in the reverse direction
-  if (tid == (int)ex_state.threads_state.size())
-  {
-    for (tid = get_cur_state().active_thread; tid >= 0; --tid)
-    {
-      if (is_thread_schedulable(tid))
-        break;
-    }
-  }
-
-  // If no valid thread is found, set tid to the size of threads_state
-  if (tid < 0)
-    tid = ex_state.threads_state.size();
-
-  // Validate user choice in interactive mode
   if (interactive_ileaves && tid != user_tid)
   {
     log_error("Ileave code selected different thread from user choice");
