@@ -365,7 +365,10 @@ protected:
   std::unordered_map<expr2tc, std::list<unsigned int>, irep2_hash> vars_map;
   /* associative container that contains global writes in */
   std::unordered_set<expr2tc, irep2_hash> is_global;
-
+  /* Map to store the global vars read by threads in current path*/
+  std::unordered_map<unsigned int, std::unordered_set<std::string>> global_reads;
+  /* Map to store the global vars wrote by threads in current path*/
+  std::unordered_map<unsigned int, std::unordered_set<std::string>> global_writes;
   friend class execution_statet;
   friend void build_goto_symex_classes();
 };

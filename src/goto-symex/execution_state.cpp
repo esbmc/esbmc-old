@@ -784,7 +784,7 @@ void execution_statet::analyze_assign(const expr2tc &code)
   if (is_nil_expr(code))
     return;
 
-  std::set<expr2tc> global_reads, global_writes;
+  std::set<std::string> global_reads, global_writes;
   const code_assign2t &assign = to_code_assign2t(code);
   get_expr_globals(ns, assign.target, global_writes);
   get_expr_globals(ns, assign.source, global_reads);
@@ -796,6 +796,10 @@ void execution_statet::analyze_assign(const expr2tc &code)
       global_reads.begin(), global_reads.end());
     thread_last_writes[active_thread].insert(
       global_writes.begin(), global_writes.end());
+    art1->global_reads[active_thread].insert(
+      global_reads.begin(), global_reads.end());
+    art1->global_writes[active_thread].insert(
+      global_writes.begin(), global_writes.end());
   }
 }
 
@@ -804,13 +808,15 @@ void execution_statet::analyze_read(const expr2tc &code)
   if (is_nil_expr(code))
     return;
 
-  std::set<expr2tc> global_reads;
+  std::set<std::string> global_reads;
   get_expr_globals(ns, code, global_reads);
 
   if (global_reads.size() > 0)
   {
     // Record read data
     thread_last_reads[active_thread].insert(
+      global_reads.begin(), global_reads.end());
+    art1->global_reads[active_thread].insert(
       global_reads.begin(), global_reads.end());
   }
 }
@@ -824,7 +830,7 @@ void execution_statet::analyze_args(const expr2tc &expr)
 void execution_statet::get_expr_globals(
   const namespacet &ns,
   const expr2tc &expr,
-  std::set<expr2tc> &globals_list)
+  std::set<std::string> &globals_list)
 {
   if (is_nil_expr(expr))
     return;
@@ -860,6 +866,7 @@ void execution_statet::get_expr_globals(
       return;
     }
 
+    expr2tc p = expr;
     bool point_to_global = false;
     if (
       symbol->type.is_pointer() && symbol->name != "invalid_object" &&
@@ -885,19 +892,27 @@ void execution_statet::get_expr_globals(
           if (!s)
             continue;
           point_to_global = s->static_lifetime || s->type.is_dynamic_set();
+          p = to_object_descriptor2t(obj).object;
+
           /* Stop when the global symbol is found */
           if (point_to_global)
             break;
         }
       }
     }
-
+    const std::string &expr_name = to_symbol2t(p).thename.as_string();
+    // TODO: This may record a write action even though the step just reads a var
+    // before any news threads are created. However, this function is only called
+    // when there are >= 2 threads. Here we assume that all global variables are wrote
+    // by main thread before creating child threads.
+    if (symbol->static_lifetime)
+      art1->global_writes[0].insert(expr_name);
     if (
       symbol->static_lifetime || symbol->type.is_dynamic_set() ||
       point_to_global)
     {
       std::list<unsigned int> threadId_list;
-      auto it_find = art1->vars_map.find(expr);
+      auto it_find = art1->vars_map.find(p);
 
       // the expression was accessed in another interleaving
       if (it_find != art1->vars_map.end())
@@ -906,7 +921,7 @@ void execution_statet::get_expr_globals(
         threadId_list.push_back(get_active_state().top().level1.thread_id);
 
         art1->vars_map.insert(
-          std::pair<expr2tc, std::list<unsigned int>>(expr, threadId_list));
+          std::pair<expr2tc, std::list<unsigned int>>(p, threadId_list));
 
         std::list<unsigned int>::iterator it_list;
         for (it_list = threadId_list.begin(); it_list != threadId_list.end();
@@ -915,32 +930,32 @@ void execution_statet::get_expr_globals(
           // find if some thread access the same expression
           if (*it_list != get_active_state().top().level1.thread_id)
           {
-            globals_list.insert(expr);
-            art1->is_global.insert(expr);
+            globals_list.insert(expr_name);
+            art1->is_global.insert(p);
           }
           // expression was not accessed by other thread
           else
           {
-            auto its_global = art1->is_global.find(expr);
+            auto its_global = art1->is_global.find(p);
             // expression was defined as global in another interleaving
             if (its_global != art1->is_global.end())
-              globals_list.insert(expr);
+              globals_list.insert(expr_name);
           }
         }
         // first access of expression
       }
       else
       {
-        auto its_global = art1->is_global.find(expr);
+        auto its_global = art1->is_global.find(p);
         if (its_global != art1->is_global.end())
-          globals_list.insert(expr);
+          globals_list.insert(expr_name);
         else
         {
           threadId_list.push_back(get_active_state().top().level1.thread_id);
           art1->vars_map.insert(
-            std::pair<expr2tc, std::list<unsigned int>>(expr, threadId_list));
-          globals_list.insert(expr);
-          art1->is_global.insert(expr);
+            std::pair<expr2tc, std::list<unsigned int>>(p, threadId_list));
+          globals_list.insert(expr_name);
+          art1->is_global.insert(p);
         }
       }
     }
@@ -950,9 +965,8 @@ void execution_statet::get_expr_globals(
     }
   }
 
-  expr->foreach_operand([this, &globals_list, &ns](const expr2tc &e) {
-    get_expr_globals(ns, e, globals_list);
-  });
+  expr->foreach_operand([this, &globals_list, &ns](const expr2tc &e)
+                        { get_expr_globals(ns, e, globals_list); });
 }
 
 bool execution_statet::check_mpor_dependency(unsigned int j, unsigned int l)
@@ -968,21 +982,20 @@ bool execution_statet::check_mpor_dependency(unsigned int j, unsigned int l)
   // don't intersect with this transitions write(s).
 
   // Double write intersection
-  for (std::set<expr2tc>::const_iterator it = thread_last_writes[j].begin();
+  for (auto it = thread_last_writes[j].begin();
        it != thread_last_writes[j].end();
        it++)
     if (thread_last_writes[l].find(*it) != thread_last_writes[l].end())
       return true;
 
   // This read what that wrote intersection
-  for (std::set<expr2tc>::const_iterator it = thread_last_reads[j].begin();
-       it != thread_last_reads[j].end();
+  for (auto it = thread_last_reads[j].begin(); it != thread_last_reads[j].end();
        it++)
     if (thread_last_writes[l].find(*it) != thread_last_writes[l].end())
       return true;
 
   // We wrote what that reads intersection
-  for (std::set<expr2tc>::const_iterator it = thread_last_writes[j].begin();
+  for (auto it = thread_last_writes[j].begin();
        it != thread_last_writes[j].end();
        it++)
     if (thread_last_reads[l].find(*it) != thread_last_reads[l].end())
@@ -1103,10 +1116,36 @@ bool execution_statet::has_cswitch_point_occured() const
   if (cswitch_forced)
     return true;
 
-  if (
-    thread_last_reads[active_thread].size() != 0 ||
-    thread_last_writes[active_thread].size() != 0)
-    return true;
+  // check if any other threads write the shared variable before.
+  for (const auto &read : thread_last_reads[active_thread])
+  {
+    if (std::any_of(
+          art1->global_writes.begin(),
+          art1->global_writes.end(),
+          [&](const auto &entry) {
+            return entry.first != active_thread && entry.second.count(read) > 0;
+          }))
+      return true;
+  }
+
+  // check if any other threads read / write the shared variable before.
+  for (const auto &write : thread_last_writes[active_thread])
+  {
+    if (
+      std::any_of(
+        art1->global_writes.begin(),
+        art1->global_writes.end(),
+        [&](const auto &entry) {
+          return entry.first != active_thread && entry.second.count(write) > 0;
+        }) ||
+      std::any_of(
+        art1->global_reads.begin(),
+        art1->global_reads.end(),
+        [&](const auto &entry) {
+          return entry.first != active_thread && entry.second.count(write) > 0;
+        }))
+      return true;
+  }
 
   return false;
 }
@@ -1167,8 +1206,7 @@ void execution_statet::print_stack_traces(unsigned int indent) const
   for (it = threads_state.begin(); it != threads_state.end(); it++)
   {
     std::ostringstream oss;
-    oss << spaces << "Thread " << i++ << ":"
-        << "\n";
+    oss << spaces << "Thread " << i++ << ":" << "\n";
     it->print_stack_trace(indent + 2, oss);
     oss << "\n";
     log_status("{}", oss.str());

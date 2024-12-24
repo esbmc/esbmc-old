@@ -391,7 +391,7 @@ public:
   void get_expr_globals(
     const namespacet &ns,
     const expr2tc &expr,
-    std::set<expr2tc> &global_list);
+    std::set<std::string> &global_list);
 
   /**
    *  Check for scheduling dependencies. Whether it exists between the variables
@@ -576,11 +576,11 @@ protected:
   /** For each thread, a set of symbols that were read by the thread in the
    *  last transition (run). Renamed to level1, as that identifies each piece of
    *  data that could have storage in C. */
-  std::vector<std::set<expr2tc>> thread_last_reads;
+  std::vector<std::set<std::string>> thread_last_reads;
   /** For each thread, a set of symbols that were written by the thread in the
    *  last transition (run). Renamed to level1, as that identifies each piece of
    *  data that could have storage in C. */
-  std::vector<std::set<expr2tc>> thread_last_writes;
+  std::vector<std::set<std::string>> thread_last_writes;
   /** Dependancy chain for POR calculations. In mpor paper, DCij elements map
    *  to dependency_chain[i][j] here. */
   std::vector<std::vector<int>> dependency_chain;
