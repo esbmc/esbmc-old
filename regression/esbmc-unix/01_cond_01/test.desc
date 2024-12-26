@@ -1,4 +1,4 @@
 CORE
 main.c
 --no-unwinding-assertions --unwind 3 --lock-order-check --context-bound 3 --smt-during-symex --smt-thread-guard --z3
-^VERIFICATION SUCCESSFUL$
+^VERIFICATION FAILED$

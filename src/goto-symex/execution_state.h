@@ -413,14 +413,6 @@ public:
    *  and is read-only. */
   bool is_transition_blocked_by_mpor() const
   {
-    /** Tong: according to Mpor rules, it schedule the transitions in increasing order of thread ids,
-     *  and for two independent transitions t1, t2 and tid(t1) < tid (t2), we only allow t2 schedule before t1 when:
-     *  there is a dependency chain ftom t2 to t1, or there exists a transition t3, where tid(t3) < tid(t1), and t2 <x t3 <x t1 along computation x,
-     *  and there is a dependency chain from t2 to t3.
-     *  Based on these, we do not rule out the main thread because there is no tid(t) < 0 and thread 0 should always be scheduled.
-     */
-    if (active_thread == 0)
-      return false;
     return mpor_says_no;
   }
 

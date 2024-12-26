@@ -152,6 +152,7 @@ void goto_convertt::do_atomic_begin(
   if (
     function.location().function() != "pthread_create" &&
     function.location().function() != "pthread_join_noswitch" &&
+    function.location().function() != "pthread_exec_key_destructors" &&
     function.location().function() != "pthread_trampoline")
   {
     code_function_callt call;

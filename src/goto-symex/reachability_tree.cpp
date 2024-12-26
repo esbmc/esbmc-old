@@ -571,8 +571,10 @@ goto_symext::symex_resultt reachability_treet::get_next_formula()
 
     switch_to_next_execution_state();
   }
-
-  (*cur_state_it)->add_memory_leak_checks();
+  // Tong: mpor rules out abort() at lower thread id when checking memory leak and cause false positives,
+  // for now we could ignore checking memory leak when main thread hasn't ended.
+  if (get_cur_state().threads_state[0].thread_ended)
+    (*cur_state_it)->add_memory_leak_checks();
 
   has_complete_formula = false;
 

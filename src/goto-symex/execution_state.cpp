@@ -853,13 +853,18 @@ void execution_statet::get_expr_globals(
       name == "c:@__ESBMC_alloc" || name == "c:@__ESBMC_alloc_size" ||
       name == "c:@__ESBMC_is_dynamic" ||
       name == "c:@__ESBMC_blocked_threads_count" ||
-      name.find("c:pthread_lib") != std::string::npos ||
+      (name.find("c:pthread_lib") != std::string::npos &&
+       name.find("mutex") == std::string::npos) ||
       name == "c:@__ESBMC_rounding_mode" ||
-      name.find("c:@__ESBMC_pthread_thread") != std::string::npos)
+      name.find("c:@__ESBMC_pthread_thread") != std::string::npos ||
+      name.find("c:@__ESBMC_pthread_end_values") != std::string::npos ||
+      name == "c:@__ESBMC_next_thread_key" ||
+      name == "c:@__ESBMC_thread_key_destructors" ||
+      name.find("c:stdlib.c@__ESBMC_atexits") != std::string::npos)
     {
       return;
     }
-
+    expr2tc p = expr;
     bool point_to_global = false;
     if (
       symbol->type.is_pointer() && symbol->name != "invalid_object" &&
@@ -885,6 +890,8 @@ void execution_statet::get_expr_globals(
           if (!s)
             continue;
           point_to_global = s->static_lifetime || s->type.is_dynamic_set();
+          /* Here we store the global variable that a pointer points to, instead of the pointer itself, so that mpor can calculate dependence */
+          p = to_object_descriptor2t(obj).object;
           /* Stop when the global symbol is found */
           if (point_to_global)
             break;
@@ -897,7 +904,7 @@ void execution_statet::get_expr_globals(
       point_to_global)
     {
       std::list<unsigned int> threadId_list;
-      auto it_find = art1->vars_map.find(expr);
+      auto it_find = art1->vars_map.find(p);
 
       // the expression was accessed in another interleaving
       if (it_find != art1->vars_map.end())
@@ -906,7 +913,7 @@ void execution_statet::get_expr_globals(
         threadId_list.push_back(get_active_state().top().level1.thread_id);
 
         art1->vars_map.insert(
-          std::pair<expr2tc, std::list<unsigned int>>(expr, threadId_list));
+          std::pair<expr2tc, std::list<unsigned int>>(p, threadId_list));
 
         std::list<unsigned int>::iterator it_list;
         for (it_list = threadId_list.begin(); it_list != threadId_list.end();
@@ -915,32 +922,32 @@ void execution_statet::get_expr_globals(
           // find if some thread access the same expression
           if (*it_list != get_active_state().top().level1.thread_id)
           {
-            globals_list.insert(expr);
-            art1->is_global.insert(expr);
+            globals_list.insert(p);
+            art1->is_global.insert(p);
           }
           // expression was not accessed by other thread
           else
           {
-            auto its_global = art1->is_global.find(expr);
+            auto its_global = art1->is_global.find(p);
             // expression was defined as global in another interleaving
             if (its_global != art1->is_global.end())
-              globals_list.insert(expr);
+              globals_list.insert(p);
           }
         }
         // first access of expression
       }
       else
       {
-        auto its_global = art1->is_global.find(expr);
+        auto its_global = art1->is_global.find(p);
         if (its_global != art1->is_global.end())
-          globals_list.insert(expr);
+          globals_list.insert(p);
         else
         {
           threadId_list.push_back(get_active_state().top().level1.thread_id);
           art1->vars_map.insert(
-            std::pair<expr2tc, std::list<unsigned int>>(expr, threadId_list));
-          globals_list.insert(expr);
-          art1->is_global.insert(expr);
+            std::pair<expr2tc, std::list<unsigned int>>(p, threadId_list));
+          globals_list.insert(p);
+          art1->is_global.insert(p);
         }
       }
     }
@@ -961,35 +968,47 @@ bool execution_statet::check_mpor_dependency(unsigned int j, unsigned int l)
   assert(j < threads_state.size());
   assert(l < threads_state.size());
 
-  // Rules given on page 13 of MPOR paper, although they don't appear to
-  // distinguish which thread is which correctly. Essentially, check that
-  // the write(s) of the previous transition (l) don't intersect with this
-  // transitions (j) reads or writes; and that the previous transitions reads
-  // don't intersect with this transitions write(s).
+  auto extract_symbol_names = [](const std::set<expr2tc> &symbols) {
+    std::unordered_set<std::string> symbol_names;
+    for (const auto &symbol : symbols)
+    {
+      std::string name = to_symbol2t(symbol).thename.as_string();
+      // skip ESBMC symbols, as they make threads
+      if (
+        !has_prefix(name, "c:@__ESBMC_") &&
+        !has_prefix(name, "c:@F@pthread_trampoline"))
+        symbol_names.insert(name);
+    }
+    return symbol_names;
+  };
 
-  // Double write intersection
-  for (std::set<expr2tc>::const_iterator it = thread_last_writes[j].begin();
-       it != thread_last_writes[j].end();
-       it++)
-    if (thread_last_writes[l].find(*it) != thread_last_writes[l].end())
-      return true;
+  // Get the last writes and reads for both the active and previous threads
+  std::unordered_set<std::string> active_last_writes =
+    extract_symbol_names(thread_last_writes[j]);
+  std::unordered_set<std::string> active_last_reads =
+    extract_symbol_names(thread_last_reads[j]);
+  std::unordered_set<std::string> previous_last_writes =
+    extract_symbol_names(thread_last_writes[l]);
+  std::unordered_set<std::string> previous_last_reads =
+    extract_symbol_names(thread_last_reads[l]);
 
-  // This read what that wrote intersection
-  for (std::set<expr2tc>::const_iterator it = thread_last_reads[j].begin();
-       it != thread_last_reads[j].end();
-       it++)
-    if (thread_last_writes[l].find(*it) != thread_last_writes[l].end())
-      return true;
+  // Check for write-write and write-read dependencies
+  for (const auto &last_write : active_last_writes)
+  {
+    if (
+      previous_last_writes.find(last_write) != previous_last_writes.end() ||
+      previous_last_reads.find(last_write) != previous_last_reads.end())
+      return true; // Dependency found
+  }
 
-  // We wrote what that reads intersection
-  for (std::set<expr2tc>::const_iterator it = thread_last_writes[j].begin();
-       it != thread_last_writes[j].end();
-       it++)
-    if (thread_last_reads[l].find(*it) != thread_last_reads[l].end())
-      return true;
+  // Check for read-write dependencies
+  for (const auto &last_read : active_last_reads)
+  {
+    if (previous_last_writes.find(last_read) != previous_last_writes.end())
+      return true; // Dependency found
+  }
 
-  // No check for read-read intersection, it doesn't affect anything
-  return false;
+  return false; // No dependency found
 }
 
 void execution_statet::calculate_mpor_constraints()
@@ -1106,7 +1125,34 @@ bool execution_statet::has_cswitch_point_occured() const
   if (
     thread_last_reads[active_thread].size() != 0 ||
     thread_last_writes[active_thread].size() != 0)
-    return true;
+  {
+    // Although mutex could be global, we don't perform context switch for it.
+    for (auto &a : thread_last_writes[active_thread])
+    {
+      if (is_struct_type(a))
+      {
+        const struct_type2t &structtype = to_struct_type(a->type);
+        if (!has_prefix(
+              structtype.name, "struct __anon_typedef_pthread_mutex_t"))
+          return true;
+      }
+      else
+        return true;
+    }
+    for (auto &a : thread_last_reads[active_thread])
+    {
+      if (is_struct_type(a))
+      {
+        const struct_type2t &structtype = to_struct_type(a->type);
+        if (!has_prefix(
+              structtype.name, "struct __anon_typedef_pthread_mutex_t"))
+          return true;
+      }
+      else
+        return true;
+    }
+    return false;
+  }
 
   return false;
 }
