@@ -474,7 +474,7 @@ protected:
     reachability_treet &art);
 
   /* Handles dereferencing between threads and is used only in data race checks. **/
-  void replace_races_check(expr2tc &expr);
+  void intrinsic_races_check_dereference(expr2tc &expr);
 
   /** Walk back up stack frame looking for exception handler. */
   bool symex_throw();
@@ -794,10 +794,6 @@ protected:
    *  @return Reference to global nondet object counter.
    */
   virtual unsigned int &get_nondet_counter() = 0;
-  /**
-   *  Incrementally check the assumption.
-   */
-  bool is_assume_false(const expr2tc &assumption);
 
   // Members
 
@@ -910,10 +906,7 @@ protected:
    *  the dereference code and the caller, who will inspect the contents after
    *  a call to dereference (in INTERNAL mode) completes. */
   std::list<dereference_callbackt::internal_item> internal_deref_items;
-  /** Analyze the shared varables in a function call, this is because an argumemt
-   *  may be renamed to constant bool in symex_function_call_code(), while we need
-   *  to get the information for context switch.*/
-  virtual void analyze_args(const expr2tc &expr) = 0;
+
   friend void build_goto_symex_classes();
 };
 
@@ -935,8 +928,6 @@ protected:
     const std::string &property,
     const std::string &msg,
     const guardt &guard) override;
-
-  void dereference_assume(const guardt &guard) override;
 
   void
   get_value_set(const expr2tc &expr, value_setst::valuest &value_set) override;
