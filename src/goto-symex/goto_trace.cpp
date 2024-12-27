@@ -250,14 +250,16 @@ void show_state_header(
   if (simplify_trace)
   {
     show_simplified_location(out, location);
-    out << "------------------------" << "\n";
+    out << "------------------------"
+        << "\n";
   }
   else
   {
     out << "State " << step_nr;
     out << " " << location << " thread " << state.thread_nr << "\n";
 
-    out << "----------------------------------------------------" << "\n";
+    out << "----------------------------------------------------"
+        << "\n";
   }
 }
 
