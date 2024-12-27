@@ -225,17 +225,40 @@ void show_goto_trace_gui(
   }
 }
 
+// Return true if the file is from the user-input
+bool input_file_check(const std::string &f_name)
+{
+  if (f_name == config.options.get_option("input-file"))
+    return true;
+  for (const auto &inc : config.ansi_c.include_files)
+  {
+    if (f_name == inc)
+      return true;
+  }
+
+  return false;
+}
+
 void show_state_header(
   std::ostream &out,
   const goto_trace_stept &state,
   const locationt &location,
-  unsigned step_nr)
+  unsigned step_nr,
+  const bool simplify_trace)
 {
   out << "\n";
-  out << "State " << step_nr;
-  out << " " << location << " thread " << state.thread_nr << "\n";
-  out << "----------------------------------------------------"
-      << "\n";
+  if (simplify_trace)
+  {
+    show_simplified_location(out, location);
+    out << "------------------------" << "\n";
+  }
+  else
+  {
+    out << "State " << step_nr;
+    out << " " << location << " thread " << state.thread_nr << "\n";
+
+    out << "----------------------------------------------------" << "\n";
+  }
 }
 
 void violation_graphml_goto_trace(
@@ -360,6 +383,35 @@ void correctness_graphml_goto_trace(
   graph.generate_graphml(options);
 }
 
+void show_simplified_location(std::ostream &out, const locationt &location)
+{
+  std::string dest;
+  const irep_idt &file = location.get_file();
+  const irep_idt &line = location.get_line();
+  const irep_idt &function = location.get_function();
+
+  if (file != "")
+  {
+    if (dest != "")
+      dest += " ";
+    dest += "file " + id2string(file);
+  }
+  if (line != "")
+  {
+    if (dest != "")
+      dest += " ";
+    dest += "line " + id2string(line);
+  }
+  if (function != "")
+  {
+    if (dest != "")
+      dest += " ";
+    dest += "function " + id2string(function);
+  }
+
+  out << dest << "\n";
+}
+
 void show_goto_trace(
   std::ostream &out,
   const namespacet &ns,
@@ -367,6 +419,8 @@ void show_goto_trace(
 {
   unsigned prev_step_nr = 0;
   bool first_step = true;
+  bool cex_only = config.options.get_bool_option("cex-only");
+  bool simplify_trace = config.options.get_bool_option("simplify-trace");
 
   for (const auto &step : goto_trace.steps)
   {
@@ -375,11 +429,22 @@ void show_goto_trace(
     case goto_trace_stept::ASSERT:
       if (!step.guard)
       {
-        show_state_header(out, step, step.pc->location, step.step_nr);
+        if (!cex_only)
+          show_state_header(
+            out, step, step.pc->location, step.step_nr, simplify_trace);
         out << "Violated property:"
             << "\n";
         if (!step.pc->location.is_nil())
-          out << "  " << step.pc->location << "\n";
+        {
+          if (simplify_trace)
+          {
+            out << "  ";
+            show_simplified_location(out, step.pc->location);
+          }
+
+          else
+            out << "  " << step.pc->location << "\n";
+        }
         if (config.options.get_bool_option("show-stacktrace"))
         {
           // Print stack trace
@@ -411,15 +476,20 @@ void show_goto_trace(
 
     case goto_trace_stept::ASSIGNMENT:
       if (
-        step.pc->is_assign() || step.pc->is_return() ||
-        (step.pc->is_other() && is_nil_expr(step.lhs)) ||
-        step.pc->is_function_call())
+        !cex_only && (step.pc->is_assign() || step.pc->is_return() ||
+                      (step.pc->is_other() && is_nil_expr(step.lhs)) ||
+                      step.pc->is_function_call()))
       {
+        if (
+          simplify_trace &&
+          !input_file_check(step.pc->location.get_file().as_string()))
+          break;
         if (prev_step_nr != step.step_nr || first_step)
         {
           first_step = false;
           prev_step_nr = step.step_nr;
-          show_state_header(out, step, step.pc->location, step.step_nr);
+          show_state_header(
+            out, step, step.pc->location, step.step_nr, simplify_trace);
         }
         counterexample_value(out, ns, step.lhs, step.value);
       }
@@ -427,16 +497,22 @@ void show_goto_trace(
 
     case goto_trace_stept::OUTPUT:
     {
-      printf_formattert printf_formatter;
-      printf_formatter(step.format_string, step.output_args);
-      printf_formatter.print(out);
-      out << "\n";
+      if (!cex_only)
+      {
+        printf_formattert printf_formatter;
+        printf_formatter(step.format_string, step.output_args);
+        printf_formatter.print(out);
+        out << "\n";
+      }
       break;
     }
 
     case goto_trace_stept::RENUMBER:
-      out << "Renumbered pointer to ";
-      counterexample_value(out, ns, step.lhs, step.value);
+      if (!cex_only)
+      {
+        out << "Renumbered pointer to ";
+        counterexample_value(out, ns, step.lhs, step.value);
+      }
       break;
 
     case goto_trace_stept::ASSUME:
