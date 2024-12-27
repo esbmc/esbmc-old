@@ -157,12 +157,12 @@ void goto_symext::symex_assign(
   replace_nondet(lhs);
   replace_nondet(rhs);
 
+  intrinsic_races_check_dereference(lhs);
+
   dereference(lhs, dereferencet::WRITE);
   dereference(rhs, dereferencet::READ);
   replace_dynamic_allocation(lhs);
   replace_dynamic_allocation(rhs);
-
-  replace_races_check(lhs);
 
   // printf expression that has lhs
   if (is_code_printf2t(rhs))
@@ -700,7 +700,7 @@ void goto_symext::symex_assign_extract(
   assert(rhs->type->get_width() == lhs->type->get_width());
 
   // We need to: read the rest of the bitfield and reconstruct it. Extract
-  // and concats are probably the best approach for the solver to optimize for.
+  // and concats are probably the best approach for the solver to optimise for.
   unsigned int bitblob_width = ex.from->type->get_width();
   expr2tc top_part;
   if (ex.upper != bitblob_width - 1)

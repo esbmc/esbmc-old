@@ -34,7 +34,6 @@ expr_typedefs1(pointer_capability, pointer_ops);
 expr_typedefs1(address_of, pointer_ops);
 expr_typedefs1(overflow, overflow_ops);
 expr_typedefs1(valid_object, object_ops);
-expr_typedefs1(races_check, object_ops);
 expr_typedefs1(dynamic_size, object_ops);
 expr_typedefs1(deallocated_obj, object_ops);
 expr_typedefs1(invalid_pointer, invalid_pointer_ops);

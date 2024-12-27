@@ -305,10 +305,7 @@ void goto_symext::symex_free(const expr2tc &expr)
       expr2tc offset = item.offset;
       expr2tc eq = equality2tc(offset, gen_ulong(0));
       g.guard_expr(eq);
-      if (options.get_bool_option("conv-assert-to-assume"))
-        assume(eq);
-      else
-        claim(eq, "Operand of free must have zero pointer offset");
+      claim(eq, "Operand of free must have zero pointer offset");
 
       // Check if we are not freeing an dynamic object allocated using alloca
       for (auto const &a : allocad)
@@ -330,10 +327,7 @@ void goto_symext::symex_free(const expr2tc &expr)
         {
           expr2tc noteq = notequal2tc(alloc_obj, item.object);
           g.guard_expr(noteq);
-          if (options.get_bool_option("conv-assert-to-assume"))
-            assume(noteq);
-          else
-            claim(noteq, "dereference failure: invalid pointer freed");
+          claim(noteq, "dereference failure: invalid pointer freed");
         }
       }
     }
@@ -614,18 +608,16 @@ void goto_symext::symex_cpp_delete(const expr2tc &expr)
 
   // we need to check the memory deallocation operator:
   // new and delete, new[] and delete[]
-  if (internal_deref_items.size())
-  {
-    bool is_arr = is_array_type(internal_deref_items.front().object->type);
-    bool is_del_arr = is_code_cpp_del_array2t(expr);
+  bool is_arr = is_array_type(internal_deref_items.front().object->type);
+  bool is_del_arr = is_code_cpp_del_array2t(expr);
 
-    if (is_arr != is_del_arr)
-    {
-      const std::string &msg =
-        "Mismatched memory deallocation operators: " + get_expr_id(expr);
-      claim(gen_false_expr(), msg);
-    }
+  if (is_arr != is_del_arr)
+  {
+    const std::string &msg =
+      "Mismatched memory deallocation operators: " + get_expr_id(expr);
+    claim(gen_false_expr(), msg);
   }
+
   // implement delete as a call to free
   symex_free(expr);
 }
@@ -1280,7 +1272,7 @@ static inline expr2tc gen_value_by_byte(
 /**
  * @brief This function will try to initialize the object pointed by
  * the address in a smarter way, minimizing the number of assignments.
- * This is intend to optimize the behavior of a memset operation:
+ * This is intend to optimize the behaviour of a memset operation:
  *
  * memset(void* ptr, int value, size_t num_of_bytes)
  *
@@ -1533,6 +1525,92 @@ void goto_symext::intrinsic_get_object_size(
     cur_state->guard);
 }
 
+void goto_symext::intrinsic_races_check_dereference(expr2tc &expr)
+{
+  if (!options.get_bool_option("data-races-check"))
+    return;
+
+  exprt tmp_exprt = migrate_expr_back(expr);
+  std::string iden;
+
+  // There are two kinds of instructions generated in a data races check:
+  // assignment and assertion (_ESBMC_deref_a = false; assert !_ESBMC_deref_a)
+
+  if (!tmp_exprt.is_not())
+    iden = tmp_exprt.is_index() ? id2string(tmp_exprt.op0().identifier())
+                                : id2string(tmp_exprt.identifier());
+  else
+  {
+    tmp_exprt = tmp_exprt.op0();
+    iden = tmp_exprt.is_index() ? id2string(tmp_exprt.op0().identifier())
+                                : id2string(tmp_exprt.identifier());
+  }
+
+  // Only instructions with special prefixes are processed
+  // _ESBMC_deref_a = "_ESBMC_deref_" + "a"
+  if (has_prefix(iden, "__ESBMC_deref"))
+  {
+    const irep_idt identifier = iden.substr(14);
+
+    const symbolt *symbol = new_context.find_symbol(identifier);
+
+    if (!symbol)
+      return;
+
+    exprt deref("dereference");
+    deref.type() = symbol_expr(*symbol).type().subtype();
+    deref.copy_to_operands(symbol_expr(*symbol));
+
+    expr2tc tmp_deref;
+    migrate_expr(deref, tmp_deref);
+    dereference(tmp_deref, dereferencet::READ);
+    deref = migrate_expr_back(tmp_deref);
+
+    const irep_idt new_idt = deref.is_symbol()
+                               ? "tmp_" + id2string(deref.identifier())
+                               : "tmp_" + id2string(deref.op0().identifier());
+
+    if (new_idt == "tmp_")
+      return;
+
+    const symbolt *s = new_context.find_symbol(new_idt);
+
+    symbolt new_symbol;
+
+    if (s)
+      new_symbol = *s;
+    else
+    {
+      type2tc index = array_type2tc(get_bool_type(), expr2tc(), true);
+
+      new_symbol.id = new_idt;
+      new_symbol.name = new_idt;
+      new_symbol.type =
+        tmp_exprt.is_index() ? migrate_type_back(index) : typet("bool");
+      new_symbol.static_lifetime = true;
+      new_symbol.value.make_false();
+
+      new_context.add(new_symbol);
+    }
+
+    deref = symbol_expr(new_symbol);
+
+    if (tmp_exprt.is_index())
+    {
+      index_exprt index(
+        symbol_expr(new_symbol),
+        to_index_expr(tmp_exprt).index(),
+        typet("bool"));
+      deref.swap(index);
+    }
+
+    if (expr->expr_id != expr2t::not_id)
+      migrate_expr(deref, expr);
+    else
+      migrate_expr(gen_not(deref), expr);
+  }
+}
+
 void goto_symext::bump_call(
   const code_function_call2t &func_call,
   const std::string &symname)
@@ -1625,29 +1703,4 @@ bool goto_symext::run_builtin(
   }
 
   return false;
-}
-
-void goto_symext::replace_races_check(expr2tc &expr)
-{
-  if (!options.get_bool_option("data-races-check"))
-    return;
-
-  // replace RACE_CHECK(&x) with __ESBMC_races_flag[&x]
-  // recursion is needed for this case: !RACE_CHECK(&x)
-  expr->Foreach_operand([this](expr2tc &e) {
-    if (!is_nil_expr(e))
-      replace_races_check(e);
-  });
-
-  if (is_races_check2t(expr))
-  {
-    // replace with __ESBMC_races_flag[address_of(var)]
-    const races_check2t &obj = to_races_check2t(expr);
-
-    expr2tc flag;
-    migrate_expr(symbol_expr(*ns.lookup("c:@F@__ESBMC_races_flag")), flag);
-
-    expr2tc index_expr = index2tc(get_bool_type(), flag, obj.value);
-    expr = index_expr;
-  }
 }

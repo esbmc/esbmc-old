@@ -29,14 +29,9 @@ bool goto_symext::check_incremental(const expr2tc &expr, const std::string &msg)
     // check whether the assertion holds
     tvt res = rte->ask_solver_question(question);
     // we don't add this assertion to the resulting logical formula
-    // However, we add it as an assumption to reduce the solver time
     if (res.is_true())
-    {
-      // convert assertion into an assumption
-      assume(expr);
       // incremental verification succeeded
       return true;
-    }
     // this assertion evaluates to false via incremental SMT solving
     if (res.is_false())
     {
@@ -118,30 +113,6 @@ void goto_symext::assertion(
     first_loop);
 }
 
-bool goto_symext::is_assume_false(const expr2tc &assumption)
-{
-  if (options.get_bool_option("smt-symex-assume"))
-  {
-    runtime_encoded_equationt *rte =
-      dynamic_cast<runtime_encoded_equationt *>(target.get());
-
-    expr2tc the_question = equality2tc(gen_true_expr(), assumption);
-
-    try
-    {
-      tvt res = rte->ask_solver_question(the_question);
-      if (res.is_false())
-        return true;
-    }
-    catch (runtime_encoded_equationt::dual_unsat_exception &e)
-    {
-      return true;
-    }
-  }
-
-  return is_false(assumption);
-}
-
 void goto_symext::assume(const expr2tc &the_assumption)
 {
   expr2tc assumption = the_assumption;
@@ -158,7 +129,7 @@ void goto_symext::assume(const expr2tc &the_assumption)
   target->assumption(tmp_guard, assumption, cur_state->source, first_loop);
 
   // If we're assuming false, make the guard for the following statement false
-  if (is_false(the_assumption) || is_assume_false(the_assumption))
+  if (is_false(the_assumption))
     cur_state->guard.make_false();
 }
 
@@ -448,10 +419,10 @@ void goto_symext::symex_assert()
   expr2tc tmp = instruction.guard;
   replace_nondet(tmp);
 
+  intrinsic_races_check_dereference(tmp);
+
   dereference(tmp, dereferencet::READ);
   replace_dynamic_allocation(tmp);
-
-  replace_races_check(tmp);
 
   claim(tmp, msg);
 }

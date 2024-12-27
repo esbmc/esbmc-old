@@ -81,7 +81,6 @@ static const char *expr_names[] = {
   "NULL-object",
   "dereference",
   "valid_object",
-  "races_check",
   "deallocated_obj",
   "dynamic_size",
   "sideeffect",
@@ -389,8 +388,7 @@ void with2t::assert_consistency() const
 {
   if (is_array_type(source_value))
   {
-    assert(
-      is_bv_type(update_field->type) || is_pointer_type(update_field->type));
+    assert(is_bv_type(update_field->type));
     const array_type2t &arr_type = to_array_type(source_value->type);
     assert_type_compat_for_with(arr_type.subtype, update_value->type);
   }

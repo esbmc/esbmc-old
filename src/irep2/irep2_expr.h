@@ -12,7 +12,7 @@
 // definitions. If you'd like to add another type - don't. Vast tracts of code
 // only expect the types below, it's be extremely difficult to hack new ones in.
 
-// Start of definitions for expressions. Forward decls
+// Start of definitions for expressions. Forward decs,
 
 // Iterate, in the preprocessor, over all expr ids and produce a forward
 // class declaration for them
@@ -125,7 +125,6 @@ public:
     std::vector<expr2tc> m)
     : constant_datatype_data(t, id, std::move(m)), init_field(init_field)
   {
-    assert(m.size() <= 1);
   }
   constant_union_data(const constant_union_data &) = default;
 
@@ -1492,7 +1491,6 @@ irep_typedefs(null_object, expr2t);
 irep_typedefs(dynamic_object, dynamic_object_data);
 irep_typedefs(dereference, dereference_data);
 irep_typedefs(valid_object, object_ops);
-irep_typedefs(races_check, object_ops);
 irep_typedefs(deallocated_obj, object_ops);
 irep_typedefs(dynamic_size, object_ops);
 irep_typedefs(sideeffect, sideeffect_data);
@@ -3013,7 +3011,7 @@ public:
 };
 
 /** Record invalid data value. Exclusively for use in pointer analysis to record
- *  the fact that what we point at is guaranteed to be invalid or nonexistant.
+ *  the fact that what we point at is guarenteed to be invalid or nonexistant.
  *  @extends expr2t */
 class invalid2t : public invalid_expr_methods
 {
@@ -3090,18 +3088,6 @@ public:
   {
   }
   valid_object2t(const valid_object2t &ref) = default;
-
-  static std::string field_names[esbmct::num_type_fields];
-};
-
-class races_check2t : public races_check_expr_methods
-{
-public:
-  races_check2t(const expr2tc &operand)
-    : races_check_expr_methods(get_bool_type(), races_check_id, operand)
-  {
-  }
-  races_check2t(const races_check2t &ref) = default;
 
   static std::string field_names[esbmct::num_type_fields];
 };

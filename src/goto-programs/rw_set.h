@@ -65,7 +65,7 @@ public:
 
   void read_rec(const exprt &expr)
   {
-    read_write_rec(expr, true, false, "", guardt(), nil_exprt());
+    read_write_rec(expr, true, false, "", guardt(), exprt());
   }
 
   void

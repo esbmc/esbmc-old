@@ -2429,16 +2429,6 @@ bool simplify_exprt::simplify_valid_object(exprt &expr)
   return simplify_object(op);
 }
 
-bool simplify_exprt::simplify_races_check(exprt &expr)
-{
-  if (expr.operands().size() != 1)
-    return true;
-
-  exprt &op = expr.op0();
-
-  return simplify_object(op);
-}
-
 bool simplify_exprt::simplify_member(member_exprt &expr)
 {
   if (expr.operands().size() != 1)
@@ -2692,8 +2682,6 @@ bool simplify_exprt::simplify_node(exprt &expr, bool simpl_const_objects)
     result = simplify_dynamic_size(expr) && result;
   else if (expr.id() == "valid_object")
     result = simplify_valid_object(expr) && result;
-  else if (expr.id() == "races_check")
-    result = simplify_races_check(expr) && result;
   else if (expr.id() == "switch")
     result = simplify_switch(expr) && result;
   else if (expr.id() == "/")

@@ -1479,12 +1479,6 @@ void migrate_expr(const exprt &expr, expr2tc &new_expr_ref)
     migrate_expr(expr.op0(), op0);
     new_expr_ref = valid_object2tc(op0);
   }
-  else if (expr.id() == "races_check")
-  {
-    expr2tc op0;
-    migrate_expr(expr.op0(), op0);
-    new_expr_ref = races_check2tc(op0);
-  }
   else if (expr.id() == "deallocated_object")
   {
     expr2tc op0;
@@ -2718,17 +2712,6 @@ exprt migrate_expr_back(const expr2tc &ref)
     typet thetype = migrate_type_back(ref->type);
     exprt op0 = migrate_expr_back(ref2.value);
     exprt theexpr("valid_object", thetype);
-    theexpr.copy_to_operands(op0);
-    return theexpr;
-  }
-  case expr2t::races_check_id:
-  {
-    const races_check2t &ref2 = to_races_check2t(ref);
-    // bool type
-    typet thetype = migrate_type_back(ref->type);
-    // op0 is address of variable
-    exprt op0 = migrate_expr_back(ref2.value);
-    exprt theexpr("races_check", thetype);
     theexpr.copy_to_operands(op0);
     return theexpr;
   }
