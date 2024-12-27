@@ -906,7 +906,7 @@ protected:
    *  the dereference code and the caller, who will inspect the contents after
    *  a call to dereference (in INTERNAL mode) completes. */
   std::list<dereference_callbackt::internal_item> internal_deref_items;
-
+  virtual void analyze_args(const expr2tc &expr) = 0;
   friend void build_goto_symex_classes();
 };
 
