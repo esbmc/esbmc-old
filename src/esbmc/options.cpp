@@ -134,7 +134,8 @@ const struct group_opt_templ all_cmd_options[] = {
      "show the stack trace of function call in the counterexample"},
     {"simplify-trace",
      NULL,
-     "do not output the assignments that are not from user-input files"},
+     "simplify the trace and exclude the assignments whose variables are not "
+     "from user-input files"},
     {"document-subgoals", NULL, "generate subgoals documentation"},
     {"no-arch", NULL, "don't set up an architecture"},
     {"no-library", NULL, "disable built-in abstract C library"},
