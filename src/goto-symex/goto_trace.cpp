@@ -385,6 +385,19 @@ void correctness_graphml_goto_trace(
   graph.generate_graphml(options);
 }
 
+void appendInfo(
+  std::string &dest,
+  const std::string &label,
+  const std::string &value)
+{
+  if (!value.empty())
+  {
+    if (!dest.empty())
+      dest += " ";
+    dest += label + " " + id2string(value);
+  }
+}
+
 void show_simplified_location(std::ostream &out, const locationt &location)
 {
   std::string dest;
@@ -393,24 +406,11 @@ void show_simplified_location(std::ostream &out, const locationt &location)
   const irep_idt &function = location.get_function();
 
   if (file != "")
-  {
-    if (dest != "")
-      dest += " ";
-    dest += "file " + id2string(file);
-  }
+    appendInfo(dest, "file", id2string(file));
   if (line != "")
-  {
-    if (dest != "")
-      dest += " ";
-    dest += "line " + id2string(line);
-  }
+    appendInfo(dest, "line", id2string(line));
   if (function != "")
-  {
-    if (dest != "")
-      dest += " ";
-    dest += "function " + id2string(function);
-  }
-
+    appendInfo(dest, "function", id2string(function));
   out << dest << "\n";
 }
 
