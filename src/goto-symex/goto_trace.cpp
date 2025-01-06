@@ -426,14 +426,16 @@ void show_goto_trace(
 
   for (const auto &step : goto_trace.steps)
   {
+    // we only care about the counter example, which is only triggered by assert steps. Ignore all other steps.
+    if (cex_only && step.type != goto_trace_stept::ASSERT)
+      continue;
     switch (step.type)
     {
     case goto_trace_stept::ASSERT:
       if (!step.guard)
       {
-        if (!cex_only)
-          show_state_header(
-            out, step, step.pc->location, step.step_nr, simplify_trace);
+        show_state_header(
+          out, step, step.pc->location, step.step_nr, simplify_trace);
         out << "Violated property:"
             << "\n";
         if (!step.pc->location.is_nil())
@@ -478,14 +480,17 @@ void show_goto_trace(
 
     case goto_trace_stept::ASSIGNMENT:
       if (
-        !cex_only && (step.pc->is_assign() || step.pc->is_return() ||
-                      (step.pc->is_other() && is_nil_expr(step.lhs)) ||
-                      step.pc->is_function_call()))
+        step.pc->is_assign() || step.pc->is_return() ||
+        (step.pc->is_other() && is_nil_expr(step.lhs)) ||
+        step.pc->is_function_call())
       {
-        if (
-          simplify_trace &&
-          !input_file_check(step.pc->location.get_file().as_string()))
-          break;
+        if (simplify_trace)
+        {
+          const irep_idt &file = step.pc->location.get_file();
+          // if the file is empty then it's probably internally created and should not print out
+          if (file == "" || !input_file_check(file.as_string()))
+            break;
+        }
         if (prev_step_nr != step.step_nr || first_step)
         {
           first_step = false;
@@ -499,23 +504,18 @@ void show_goto_trace(
 
     case goto_trace_stept::OUTPUT:
     {
-      if (!cex_only)
-      {
-        printf_formattert printf_formatter;
-        printf_formatter(step.format_string, step.output_args);
-        printf_formatter.print(out);
-        out << "\n";
-      }
-      break;
+      printf_formattert printf_formatter;
+      printf_formatter(step.format_string, step.output_args);
+      printf_formatter.print(out);
+      out << "\n";
     }
 
     case goto_trace_stept::RENUMBER:
-      if (!cex_only)
-      {
-        out << "Renumbered pointer to ";
-        counterexample_value(out, ns, step.lhs, step.value);
-      }
+    {
+      out << "Renumbered pointer to ";
+      counterexample_value(out, ns, step.lhs, step.value);
       break;
+    }
 
     case goto_trace_stept::ASSUME:
     case goto_trace_stept::SKIP:
