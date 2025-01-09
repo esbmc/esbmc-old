@@ -67,8 +67,6 @@ execution_statet::execution_statet(
   threads_state.push_back(state);
   preserved_paths.emplace_back();
   cur_state = &threads_state.front();
-  cur_state->global_guard.make_true();
-  cur_state->global_guard.add(get_guard_identifier());
 
   atomic_numbers.push_back(0);
 
@@ -736,8 +734,6 @@ unsigned int execution_statet::add_thread(const goto_programt *prog)
   unsigned int thread_nr = threads_state.size();
   new_state.source.thread_nr = thread_nr;
   new_state.guard = cur_state->guard;
-  new_state.global_guard.make_true();
-  new_state.global_guard.add(get_guard_identifier());
   threads_state.push_back(new_state);
   preserved_paths.emplace_back();
   atomic_numbers.push_back(0);

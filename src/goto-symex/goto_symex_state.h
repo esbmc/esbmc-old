@@ -434,8 +434,6 @@ public:
 
   /** Current state guard of this thread. */
   guardt guard;
-  /** Guard of global context. */
-  guardt global_guard;
   /** Current program location of this thread. */
   symex_targett::sourcet source;
   /** Counter for how many times a particular variable has been declared:

@@ -1,5 +1,4 @@
 CORE
 MyContract_array.solast
 --function func_array --falsification --sol MyContract_array.sol
-.*line 13 function func_array$
 ^VERIFICATION FAILED$

@@ -36,7 +36,6 @@ goto_symex_statet &goto_symex_statet::operator=(const goto_symex_statet &state)
   num_instructions = state.num_instructions;
   thread_ended = state.thread_ended;
   guard = state.guard;
-  global_guard = state.global_guard;
   source = state.source;
   variable_instance_nums = state.variable_instance_nums;
   loop_iterations = state.loop_iterations;
