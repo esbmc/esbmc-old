@@ -1,0 +1,11 @@
+url_path,views_total,views_unique
+/esbmc/esbmc,460,144
+/esbmc/esbmc/issues,122,34
+/esbmc/esbmc/tree/master/regression/python,117,2
+/esbmc/esbmc/pulls,113,18
+/esbmc/esbmc/actions,93,6
+/esbmc/esbmc/actions/workflows/benchexec.yml,60,3
+/esbmc/esbmc/pull/2222,53,4
+/esbmc/esbmc/discussions/2212,52,10
+/esbmc/esbmc/blob/master/BUILDING.md,49,19
+/esbmc/esbmc/discussions,44,3
