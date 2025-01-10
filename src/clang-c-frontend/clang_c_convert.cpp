@@ -292,6 +292,13 @@ bool clang_c_convertert::get_decl(const clang::Decl &decl, exprt &new_expr)
 
 bool clang_c_convertert::get_struct_union_class(const clang::RecordDecl &rd)
 {
+  return get_struct_union_class(rd, false);
+}
+
+bool clang_c_convertert::get_struct_union_class(
+  const clang::RecordDecl &rd,
+  bool only_forward_declare)
+{
   if (rd.isInterface())
   {
     log_error("Interface is not supported");
@@ -358,6 +365,10 @@ bool clang_c_convertert::get_struct_union_class(const clang::RecordDecl &rd)
    * (via pointers): it either is already being defined (up the stack somewhere)
    * or it's already a complete struct or union in the context. */
   if (!sym->type.incomplete())
+    return false;
+
+  /* If we're only forward declaring, we don't need to complete the type */
+  if (only_forward_declare)
     return false;
   sym->type.remove(irept::a_incomplete);
 
@@ -1791,6 +1802,15 @@ bool clang_c_convertert::get_expr(const clang::Stmt &stmt, exprt &new_expr)
       static_cast<const clang::CallExpr &>(stmt);
 
     const clang::Stmt *callee = function_call.getCallee();
+    const clang::Decl *callee_decl = function_call.getCalleeDecl();
+//    log_error("BEGIN");
+    if(callee_decl)
+    {
+//      callee_decl->dump();
+      exprt unused;
+      get_decl(*callee_decl, unused);
+    }
+//    log_error("END");
 
 #if CLANG_VERSION_MAJOR > 14
     if (

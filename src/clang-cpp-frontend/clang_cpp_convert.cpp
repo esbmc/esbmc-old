@@ -36,6 +36,17 @@ clang_cpp_convertert::clang_cpp_convertert(
 
 bool clang_cpp_convertert::get_decl(const clang::Decl &decl, exprt &new_expr)
 {
+  return get_decl(decl, new_expr, false);
+}
+
+bool clang_cpp_convertert::get_decl(
+  const clang::Decl &decl,
+  exprt &new_expr,
+  bool only_forward_declare)
+{
+//  assert(
+//    !only_forward_declare ||
+//    decl.getKind() == clang::Decl::ClassTemplateSpecialization);
   new_expr = code_skipt();
 
   switch (decl.getKind())
@@ -56,7 +67,7 @@ bool clang_cpp_convertert::get_decl(const clang::Decl &decl, exprt &new_expr)
     const clang::CXXRecordDecl &cxxrd =
       static_cast<const clang::CXXRecordDecl &>(decl);
 
-    if (get_struct_union_class(cxxrd))
+    if (get_struct_union_class(cxxrd, only_forward_declare))
       return true;
 
     break;
@@ -114,7 +125,7 @@ bool clang_cpp_convertert::get_decl(const clang::Decl &decl, exprt &new_expr)
     const clang::ClassTemplateSpecializationDecl &cd =
       static_cast<const clang::ClassTemplateSpecializationDecl &>(decl);
 
-    if (get_struct_union_class(cd))
+    if (get_struct_union_class(cd, only_forward_declare))
       return true;
     break;
   }
@@ -370,11 +381,18 @@ bool clang_cpp_convertert::get_method(
 
 bool clang_cpp_convertert::get_struct_union_class(const clang::RecordDecl &rd)
 {
+  return get_struct_union_class(rd, false);
+}
+
+bool clang_cpp_convertert::get_struct_union_class(
+  const clang::RecordDecl &rd,
+  bool only_forward_declare)
+{
   // Only convert RecordDecl not depending on a template parameter
   if (rd.isDependentContext())
     return false;
 
-  return clang_c_convertert::get_struct_union_class(rd);
+  return clang_c_convertert::get_struct_union_class(rd, only_forward_declare);
 }
 
 bool clang_cpp_convertert::get_struct_union_class_fields(
@@ -1685,7 +1703,8 @@ template <typename SpecializationDecl>
 bool clang_cpp_convertert::get_template_decl_specialization(
   const SpecializationDecl *D,
   bool DumpExplicitInst,
-  exprt &new_expr)
+  exprt &new_expr,
+  bool OnlyForwardDeclare)
 {
   for (auto const *redecl_with_bad_type : D->redecls())
   {
@@ -1708,7 +1727,7 @@ bool clang_cpp_convertert::get_template_decl_specialization(
       // Fall through.
     case clang::TSK_Undeclared:
     case clang::TSK_ImplicitInstantiation:
-      if (get_decl(*redecl, new_expr))
+      if (get_decl(*redecl, new_expr, OnlyForwardDeclare))
         return true;
       break;
     }
@@ -1723,9 +1742,13 @@ bool clang_cpp_convertert::get_template_decl(
   bool DumpExplicitInst,
   exprt &new_expr)
 {
-  for (auto *Child : D->specializations())
-    if (get_template_decl_specialization(Child, DumpExplicitInst, new_expr))
-      return true;
+//  for (auto *Child : D->specializations())
+//    if (get_template_decl_specialization(
+//          Child,
+//          DumpExplicitInst,
+//          new_expr,
+//          !D->isThisDeclarationADefinition()))
+//      return true;
 
   return false;
 }

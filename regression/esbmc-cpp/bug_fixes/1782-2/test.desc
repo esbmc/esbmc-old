@@ -1,0 +1,6 @@
+CORE
+gh-1782.cc
+
+^ERROR: main symbol `main' not found
+^ERROR: CONVERSION ERROR
+

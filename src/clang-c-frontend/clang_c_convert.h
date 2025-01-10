@@ -144,6 +144,10 @@ protected:
 
   virtual bool get_struct_union_class(const clang::RecordDecl &recordd);
 
+  virtual bool get_struct_union_class(
+    const clang::RecordDecl &recordd,
+    bool only_forward_declare);
+
   /*
    * Get class fields of the type `clang::Decl::Field`
    *
