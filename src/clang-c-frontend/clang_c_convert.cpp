@@ -689,8 +689,23 @@ bool clang_c_convertert::get_function(
   // We need: a type, a name, and an optional body
   if (fd.hasBody())
   {
-    if (get_function_body(fd, added_symbol.value, type))
-      return true;
+    if (added_symbol.value.is_nil())
+    {
+      // see regressions/esbmc-cpp/bugfixes/63
+      // In C++ we can have a member function `foo` that calls itself.
+      // This causes a problem because when we parse the function body, we encounter
+      // `-CXXMemberCallExpr 'bar type'
+      //   |-MemberExpr '<bound member function type>' ->foo
+      // and when parsing the member expressions, we will try to get the function for `foo`
+      // which brings us here again, and we will try to parse the body again.
+      // In the end, we will have a stack overflow.
+      // To fix this, we only pull in the body when we don't have a value for it.
+      // This alone does not fix the problem, because the value is not set before recursing
+      // again. That's why we set the value to a dummy value before getting the body.
+      added_symbol.value = exprt("dummy_function_body_should_not_exist");
+      if (get_function_body(fd, added_symbol.value, type))
+        return true;
+    }
   }
 
   // Restore old functionDecl
