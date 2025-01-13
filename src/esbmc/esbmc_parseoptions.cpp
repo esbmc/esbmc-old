@@ -1125,7 +1125,7 @@ int esbmc_parseoptionst::doit_k_induction_parallel()
     options.set_option("inductive-step", true);
 
     options.set_option("no-unwinding-assertions", true);
-    options.set_option("partial-loops", true);
+    options.set_option("partial-loops", false);
 
     // Start communication to the parent process
     close(forward_pipe[0]);
@@ -1479,7 +1479,7 @@ tvt esbmc_parseoptionst::is_inductive_step_violated(
   options.set_option("forward-condition", false);
   options.set_option("inductive-step", true);
   options.set_option("no-unwinding-assertions", true);
-  options.set_option("partial-loops", true);
+  options.set_option("partial-loops", false);
   options.set_option("unwind", integer2string(k_step));
 
   bmct bmc(goto_functions, options, context);
