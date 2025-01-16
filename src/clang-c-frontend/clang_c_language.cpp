@@ -207,7 +207,8 @@ void clang_c_languaget::build_compiler_args(
   for (auto const &inc : config.ansi_c.warnings)
     compiler_args.push_back("-W" + inc);
 
-  compiler_args.emplace_back("-D__builtin_memcpy=memcpy");
+  compiler_args.emplace_back("-D__builtin_memcpy=__esbmc_builtin_memcpy");
+  compiler_args.emplace_back("-D__builtin_memmove=__esbmc_builtin_memmove");
 
   compiler_args.emplace_back("-D__ESBMC_alloca=__builtin_alloca");
 
@@ -443,6 +444,10 @@ void __VERIFIER_atomic_end();
 /* Causes a verification error when its call is reachable; internal use in math
  * models */
 void __ESBMC_unreachable();
+
+/* Used to implement the `__builtin`s for memcpy and memmove */
+void *__esbmc_builtin_memcpy(void *, const void *, __SIZE_TYPE__);
+void *__esbmc_builtin_memmove(void *, const void *, __SIZE_TYPE__);
     )";
 
   if (config.ansi_c.cheri)

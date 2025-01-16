@@ -265,6 +265,11 @@ __ESBMC_HIDE:;
   return dst;
 }
 
+void *__esbmc_builtin_memcpy(void *dst, const void *src, size_t n)
+{
+  return memcpy(dst, src, n);
+}
+
 void *__memset_impl(void *s, int c, size_t n)
 {
 __ESBMC_HIDE:;
@@ -298,6 +303,11 @@ __ESBMC_HIDE:;
       cdest[i - 1] = csrc[i - 1];
   }
   return dest;
+}
+
+void *__esbmc_builtin_memmove(void *dest, const void *src, size_t n)
+{
+  return memmove(dest, src, n);
 }
 
 int memcmp(const void *s1, const void *s2, size_t n)
