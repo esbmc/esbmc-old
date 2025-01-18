@@ -225,17 +225,42 @@ void show_goto_trace_gui(
   }
 }
 
+// Return true if the file is from the user-input
+bool input_file_check(const std::string &f_name)
+{
+  if (f_name == config.options.get_option("input-file"))
+    return true;
+  for (const auto &inc : config.ansi_c.include_files)
+  {
+    if (f_name == inc)
+      return true;
+  }
+
+  return false;
+}
+
 void show_state_header(
   std::ostream &out,
   const goto_trace_stept &state,
   const locationt &location,
-  unsigned step_nr)
+  unsigned step_nr,
+  const bool simplify_trace)
 {
   out << "\n";
-  out << "State " << step_nr;
-  out << " " << location << " thread " << state.thread_nr << "\n";
-  out << "----------------------------------------------------"
-      << "\n";
+  if (simplify_trace)
+  {
+    show_simplified_location(out, location);
+    out << "------------------------"
+        << "\n";
+  }
+  else
+  {
+    out << "State " << step_nr;
+    out << " " << location << " thread " << state.thread_nr << "\n";
+
+    out << "----------------------------------------------------"
+        << "\n";
+  }
 }
 
 void violation_graphml_goto_trace(
@@ -360,6 +385,35 @@ void correctness_graphml_goto_trace(
   graph.generate_graphml(options);
 }
 
+void appendInfo(
+  std::string &dest,
+  const std::string &label,
+  const std::string &value)
+{
+  if (!value.empty())
+  {
+    if (!dest.empty())
+      dest += " ";
+    dest += label + " " + id2string(value);
+  }
+}
+
+void show_simplified_location(std::ostream &out, const locationt &location)
+{
+  std::string dest;
+  const irep_idt &file = location.get_file();
+  const irep_idt &line = location.get_line();
+  const irep_idt &function = location.get_function();
+
+  if (file != "")
+    appendInfo(dest, "file", id2string(file));
+  if (line != "")
+    appendInfo(dest, "line", id2string(line));
+  if (function != "")
+    appendInfo(dest, "function", id2string(function));
+  out << dest << "\n";
+}
+
 void show_goto_trace(
   std::ostream &out,
   const namespacet &ns,
@@ -367,19 +421,34 @@ void show_goto_trace(
 {
   unsigned prev_step_nr = 0;
   bool first_step = true;
+  bool cex_only = config.options.get_bool_option("cex-only");
+  bool simplify_trace = config.options.get_bool_option("simplify-trace");
 
   for (const auto &step : goto_trace.steps)
   {
+    // we only care about the counter example, which is only triggered by assert steps. Ignore all other steps.
+    if (cex_only && step.type != goto_trace_stept::ASSERT)
+      continue;
     switch (step.type)
     {
     case goto_trace_stept::ASSERT:
       if (!step.guard)
       {
-        show_state_header(out, step, step.pc->location, step.step_nr);
+        show_state_header(
+          out, step, step.pc->location, step.step_nr, simplify_trace);
         out << "Violated property:"
             << "\n";
         if (!step.pc->location.is_nil())
-          out << "  " << step.pc->location << "\n";
+        {
+          if (simplify_trace)
+          {
+            out << "  ";
+            show_simplified_location(out, step.pc->location);
+          }
+
+          else
+            out << "  " << step.pc->location << "\n";
+        }
         if (config.options.get_bool_option("show-stacktrace"))
         {
           // Print stack trace
@@ -415,11 +484,19 @@ void show_goto_trace(
         (step.pc->is_other() && is_nil_expr(step.lhs)) ||
         step.pc->is_function_call())
       {
+        if (simplify_trace)
+        {
+          const irep_idt &file = step.pc->location.get_file();
+          // if the file is empty then it's probably internally created and should not print out
+          if (file == "" || !input_file_check(file.as_string()))
+            break;
+        }
         if (prev_step_nr != step.step_nr || first_step)
         {
           first_step = false;
           prev_step_nr = step.step_nr;
-          show_state_header(out, step, step.pc->location, step.step_nr);
+          show_state_header(
+            out, step, step.pc->location, step.step_nr, simplify_trace);
         }
         counterexample_value(out, ns, step.lhs, step.value);
       }
@@ -431,13 +508,14 @@ void show_goto_trace(
       printf_formatter(step.format_string, step.output_args);
       printf_formatter.print(out);
       out << "\n";
-      break;
     }
 
     case goto_trace_stept::RENUMBER:
+    {
       out << "Renumbered pointer to ";
       counterexample_value(out, ns, step.lhs, step.value);
       break;
+    }
 
     case goto_trace_stept::ASSUME:
     case goto_trace_stept::SKIP:

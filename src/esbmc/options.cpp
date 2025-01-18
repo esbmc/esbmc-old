@@ -132,6 +132,10 @@ const struct group_opt_templ all_cmd_options[] = {
     {"show-stacktrace",
      NULL,
      "show the stack trace of function call in the counterexample"},
+    {"simplify-trace",
+     NULL,
+     "simplify the trace and exclude the assignments whose variables are not "
+     "from user-input files"},
     {"document-subgoals", NULL, "generate subgoals documentation"},
     {"no-arch", NULL, "don't set up an architecture"},
     {"no-library", NULL, "disable built-in abstract C library"},
@@ -408,6 +412,7 @@ const struct group_opt_templ all_cmd_options[] = {
     {"show-cex",
      NULL,
      "print the counter-example produced by the inductive step"},
+    {"cex-only", NULL, "do not print the state trace"},
     {"bidirectional", NULL, ""},
     {"unlimited-k-steps", NULL, "set max number of iteration to UINT_MAX"},
     {"max-inductive-step",
