@@ -1,7 +1,7 @@
 #ifndef STL_STDEXCEPT
 #define STL_STDEXCEPT
 
-#include "definitions.h"
+#include "cstddef"
 #include "exception"
 #include "new"
 #include <string>

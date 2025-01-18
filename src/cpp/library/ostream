@@ -2,7 +2,7 @@
 #define STL_OSTREAM
 
 #include "ios"
-#include "definitions.h"
+#include "cstddef"
 //#include "iomanip"
 //#include "cstring"
 

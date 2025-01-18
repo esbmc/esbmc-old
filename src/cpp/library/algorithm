@@ -2,7 +2,7 @@
 #define STL_ALGORITHM
 
 //#include "iterator"
-#include "definitions.h"
+#include "cstddef"
 #include <utility>
 
 typedef bool(function)(int arg1, int arg2);

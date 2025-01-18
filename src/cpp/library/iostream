@@ -2,7 +2,7 @@
 #define STL_IOSTREAM
 
 #include "iomanip"
-#include "definitions.h"
+#include "cstddef"
 #include "istream"
 #include "ostream"
 

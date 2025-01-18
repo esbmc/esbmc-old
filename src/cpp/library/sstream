@@ -2,7 +2,7 @@
 #define STL_SSTREAM
 
 #include "streambuf"
-#include "definitions.h"
+#include "cstddef"
 #include "ostream"
 #include "ios"
 #include "string"

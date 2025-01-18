@@ -1,7 +1,7 @@
 #ifndef STL_CSIGNAL
 #define STL_CSIGNAL
 
-#include "definitions.h"
+#include "cstddef"
 
 typedef void (*sighandler)(int);
 

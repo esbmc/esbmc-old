@@ -5,7 +5,7 @@
 #include "string"
 #include "istream"
 #include "ostream"
-#include "definitions.h"
+#include "cstddef"
 #include "ios"
 
 namespace std

@@ -2,7 +2,7 @@
 #define STL_STREAMBUF
 
 #include "OM_compiler_defs.h"
-#include "definitions.h"
+#include "cstddef"
 #include "cstdio"
 
 namespace std

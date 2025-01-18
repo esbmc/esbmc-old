@@ -2,7 +2,7 @@
 #define STL_ISTREAM
 
 #include "ios"
-#include "definitions.h"
+#include "cstddef"
 #include "cstdio"
 
 namespace std

@@ -1,7 +1,7 @@
 #ifndef STL_VALARRAY
 #define STL_VALARRAY
 
-#include "definitions.h"
+#include "cstddef"
 
 namespace std
 {

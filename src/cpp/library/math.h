@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include "definitions.h"
+#include "cstddef"
 
 /* Support LLVM's libc++, which defines the float and long double overloads
  * in the top-level :: namespace in <math.h> when __cplusplus is set. These

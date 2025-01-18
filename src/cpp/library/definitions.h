@@ -1,8 +1,6 @@
 #ifndef STL_DEFINITIONS
 #define STL_DEFINITIONS
 
-#include "cstddef"
-
 #define SIGINT 2
 
 #define SEEK_SET 0

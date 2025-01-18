@@ -1,7 +1,7 @@
 #ifndef STL_STRING
 #define STL_STRING
 
-#include "definitions.h"
+#include "cstddef"
 #include "cstring"
 #include "cstdio"
 #include "cassert"
