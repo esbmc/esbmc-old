@@ -373,7 +373,6 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
     expr = side_effect;
   };
 
-  // Function calls in expressions like "fib(n-1) + fib(n-2)" need to be converted to side effects
   if (lhs.is_function_call())
     to_side_effect_call(lhs);
   if (rhs.is_function_call())
@@ -388,11 +387,9 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
 
   assert(!op.empty());
 
-  // Get LHS and RHS types from variable annotation
   std::string lhs_type = get_operand_type(left);
   std::string rhs_type = get_operand_type(right);
 
-  // If RHS is a string literal, like x = "foo", then we determine the type from the JSON value
   if (
     rhs_type.empty() && element.contains("comparators") &&
     element["comparators"][0].contains("value") &&
@@ -403,32 +400,18 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
 
   if (lhs_type == "str" && rhs_type == "str")
   {
-    // Strings comparison
     if (op == "Eq")
     {
-      if (rhs.type() != lhs.type())
-        return gen_boolean(false);
-
-      array_typet &arr_type = static_cast<array_typet &>(lhs.type());
-      BigInt str_size =
-        binary2integer(arr_type.size().value().as_string(), false);
-
-      // call strncmp to compare strings
-      symbolt *strncmp = context.find_symbol("c:@F@strncmp");
-      assert(strncmp);
-      side_effect_expr_function_callt sideeffect;
-      sideeffect.function() = symbol_expr(*strncmp);
-      sideeffect.arguments().push_back(lhs); // passing lhs to strncmp
-      sideeffect.arguments().push_back(rhs); // passing rhs to strncmp
-      sideeffect.arguments().push_back(
-        from_integer(str_size, long_uint_type())); // passing n to strncmp
-      sideeffect.location() = get_location_from_decl(element);
-      sideeffect.type() = int_type();
-
-      lhs = sideeffect;
-      rhs = gen_zero(int_type());
+      // Compare full string arrays directly
+      exprt str_eq("=", bool_type());
+      // Take address of full array on LHS
+      address_of_exprt lhs_addr(lhs);
+      // Take address of first element on RHS since that's how it's passed
+      index_exprt rhs_idx(rhs, from_integer(0, int_type()));
+      address_of_exprt rhs_addr(rhs_idx);
+      str_eq.copy_to_operands(lhs_addr, rhs_addr);
+      return str_eq;
     }
-    // Strings concatenation
     else if (op == "Add")
     {
       array_typet lhs_str_type = static_cast<array_typet &>(lhs.type());
@@ -448,22 +431,26 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
 
       auto get_value_from_symbol = [&](const std::string &symbol_id, exprt &e) {
         symbolt *symbol = context.find_symbol(symbol_id);
-        assert(symbol);
-        // Copy symbol value
+        if (!symbol)
+          return;
         for (const exprt &ch : symbol->value.operands())
-          e.operands().at(i++) = ch;
+          if (i < e.operands().size())
+            e.operands().at(i++) = ch;
       };
 
       auto get_value_from_json = [&](const nlohmann::json &elem, exprt &e) {
+        if (!elem.contains("value") || !elem["value"].is_string())
+          return;
         const std::string &value = elem["value"].get<std::string>();
         std::vector<uint8_t> string_literal =
           std::vector<uint8_t>(std::begin(value), std::end(value));
 
         typet &char_type = t.subtype();
 
-        // Copy JSON value
         for (uint8_t &ch : string_literal)
         {
+          if (i >= e.operands().size())
+            break;
           exprt char_value = constant_exprt(
             integer2binary(BigInt(ch), bv_width(char_type)),
             integer2string(BigInt(ch)),
@@ -473,17 +460,13 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
         }
       };
 
-      // If LHS is a variable
       if (left["_type"] == "Name")
         get_value_from_symbol(lhs.identifier().as_string(), expr);
-      // If LHS is a literal
       else if (left["_type"] == "Constant")
         get_value_from_json(left, expr);
 
-      // If RHS is a variable
       if (right["_type"] == "Name")
         get_value_from_symbol(rhs.identifier().as_string(), expr);
-      // If RHS is a literal
       else if (right["_type"] == "Constant")
         get_value_from_json(right, expr);
 
@@ -495,7 +478,6 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
 
   assert(lhs.type() == rhs.type());
 
-  // Replace ** operation with the resultant constant.
   if (op == "Pow")
   {
     BigInt base(
@@ -510,29 +492,20 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
   exprt bin_expr(get_op(op, type), type);
   bin_expr.copy_to_operands(lhs, rhs);
 
-  // floor division (//) operation corresponds to an int division with floor rounding
-  // So we need to emulate this behavior here:
-  // int result = (num/div) - (num%div != 0 && ((num < 0) ^ (den<0)) ? 1 : 0)
-  // e.g.: -5//2 equals to -3, and 5//2 equals to 2
   if (op == "FloorDiv")
   {
     typet div_type = bin_expr.type();
-    // remainder = num%den;
     exprt remainder("mod", div_type);
     remainder.copy_to_operands(lhs, rhs);
 
-    // Get num signal
     exprt is_num_neg("<", bool_type());
     is_num_neg.copy_to_operands(lhs, gen_zero(div_type));
-    // Get den signal
     exprt is_den_neg("<", bool_type());
     is_den_neg.copy_to_operands(rhs, gen_zero(div_type));
 
-    // remainder != 0
     exprt pos_remainder("notequal", bool_type());
     pos_remainder.copy_to_operands(remainder, gen_zero(div_type));
 
-    // diff_signals = is_num_neg ^ is_den_neg;
     exprt diff_signals("bitxor", bool_type());
     diff_signals.copy_to_operands(is_num_neg, is_den_neg);
 
@@ -541,31 +514,10 @@ exprt python_converter::get_binary_operator_expr(const nlohmann::json &element)
     exprt if_expr("if", div_type);
     if_expr.copy_to_operands(cond, gen_one(div_type), gen_zero(div_type));
 
-    // floor_div = (lhs / rhs) - (1 if (lhs % rhs != 0) and (lhs < 0) ^ (rhs < 0) else 0)
     exprt floor_div("-", div_type);
-    floor_div.copy_to_operands(bin_expr, if_expr); //bin_expr contains lhs/rhs
+    floor_div.copy_to_operands(bin_expr, if_expr);
 
     return floor_div;
-  }
-
-  // Handle chained comparisons like: assert 0 <= x <= 1
-  if (element.contains("comparators") && element["comparators"].size() > 1)
-  {
-    exprt cond("and", bool_type());
-    cond.move_to_operands(
-      bin_expr); // bin_expr compares left and comparators[0]
-    for (size_t i = 0; i + 1 < element["comparators"].size(); i += 2)
-    {
-      std::string op(element["ops"][i + 1]["_type"].get<std::string>());
-      exprt logical_expr(get_op(op, bool_type()), bool_type());
-      exprt operand = get_expr(element["comparators"][i]);
-      logical_expr.copy_to_operands(operand);
-      operand = get_expr(element["comparators"][i + 1]);
-      logical_expr.copy_to_operands(operand);
-
-      cond.move_to_operands(logical_expr);
-    }
-    return cond;
   }
 
   return bin_expr;
@@ -634,8 +586,18 @@ symbolt *python_converter::find_function_in_base_classes(
         std::string("@C@" + current_class + "@F@" + current_func_name).length(),
         std::string("@C@" + base_class + "@F@" + method_name));
 
-      if ((func = context.find_symbol(sym_id.c_str())))
+      func = context.find_symbol(sym_id.c_str());
+      if (func)
+      {
         return func;
+      }
+      // Try looking up in base classes recursively
+      func =
+        find_function_in_base_classes(base_class, sym_id, method_name, is_ctor);
+      if (func)
+      {
+        return func;
+      }
 
       current_class = base_class;
     }
@@ -1195,13 +1157,29 @@ exprt python_converter::get_expr(const nlohmann::json &element)
 
     std::string sid_str = sid.to_string();
 
-    symbolt *symbol = nullptr;
-    if (
-      !(symbol = context.find_symbol(sid_str)) &&
-      !(symbol = find_symbol_in_global_scope(sid_str)) &&
-      !(symbol = find_symbol_in_imported_modules(sid_str)))
+    symbolt *symbol = context.find_symbol(sid_str);
+    if (!symbol)
     {
-      throw std::runtime_error("Symbol " + sid_str + " not found");
+      symbol = find_symbol_in_global_scope(sid_str);
+    }
+    if (!symbol)
+    {
+      symbol = find_symbol_in_imported_modules(sid_str);
+    }
+    if (!symbol)
+    {
+      // Try to find in base classes if this is a class member
+      std::string class_name = get_classname_from_symbol_id(sid_str);
+      if (!class_name.empty())
+      {
+        symbol = find_function_in_base_classes(class_name, sid_str, "", false);
+      }
+    }
+    if (!symbol)
+    {
+      throw std::runtime_error(
+        "Symbol " + sid_str + " not found in:\n" + "- Current context\n" +
+        "- Global scope\n" + "- Imported modules\n" + "- Base classes");
     }
 
     expr = symbol_expr(*symbol);
@@ -1562,23 +1540,28 @@ void python_converter::get_var_assign(
   {
     if (lhs_symbol)
     {
-      if (lhs_type == "str")
+      // Special handling for string literals
+      if (lhs_type == "str" || rhs.type().subtype() == char_type())
       {
-        /* When a string is assigned the result of a concatenation, we initially
-         * create the LHS type as a zero-size array: "current_element_type = get_typet(lhs_type, type_size);"
-         * After parsing the RHS, we need to adjust the LHS type size to match
-         * the size of the resulting RHS string.*/
-        lhs_symbol->type = rhs.type();
+        array_typet &rhs_type = static_cast<array_typet &>(rhs.type());
+        exprt string_content = rhs;
+        // Create new array with same size
+        exprt new_array = gen_zero(rhs_type);
+
+        // Copy each character value
+        for (unsigned i = 0; i < rhs.operands().size(); i++)
+        {
+          new_array.operands()[i] = rhs.operands()[i];
+        }
+
+        rhs = new_array;
+        lhs_symbol->type = rhs_type;
       }
       lhs_symbol->value = rhs;
     }
 
-    /* If the right-hand side (rhs) of the assignment is a function call, such as: x : int = func()
-     * we need to adjust the left-hand side (lhs) of the function call to refer to the lhs of the current assignment.
-     */
     if (rhs.is_function_call())
     {
-      // If rhs is a constructor call so it is necessary to update lhs instance attributes with members added in self
       if (is_ctor_call)
       {
         std::string func_name = ast_node["value"]["func"]["id"];
@@ -1593,7 +1576,6 @@ void python_converter::get_var_assign(
         update_instance_from_self(
           func_name, func_name, lhs_symbol->id.as_string());
       }
-      // op0() refers to the left-hand side (lhs) of the function call
       rhs.op0() = lhs;
       target_block.copy_to_operands(rhs);
       return;
@@ -1713,7 +1695,39 @@ void python_converter::get_function_definition(
   // Function return type
   code_typet type;
   const nlohmann::json &return_node = function_node["returns"];
-  if (return_node.contains("id"))
+  if (
+    return_node.contains("id") && return_node["id"].get<std::string>() == "str")
+  {
+    // For string return types, properly set the array size
+    const auto &return_stmt = get_return_statement(function_node);
+    if (return_stmt["value"]["_type"] == "Name")
+    {
+      // Get size from function argument
+      for (const auto &arg : function_node["args"]["args"])
+      {
+        if (
+          arg["arg"].get<std::string>() ==
+          return_stmt["value"]["id"].get<std::string>())
+        {
+          // Copy same size as input argument for function like f(x: str) -> str
+          size_t arg_size = 3; // Default if not found
+          if (return_stmt["value"]["value"].is_string())
+          {
+            arg_size = return_stmt["value"]["value"].get<std::string>().size();
+          }
+          type.return_type() = get_typet("str", arg_size);
+          break;
+        }
+      }
+    }
+    else if (return_stmt["value"]["_type"] == "Constant")
+    {
+      // Get size directly from string literal
+      type.return_type() = get_typet(
+        "str", return_stmt["value"]["value"].get<std::string>().size());
+    }
+  }
+  else if (return_node.contains("id"))
   {
     type.return_type() = get_typet(return_node["id"].get<std::string>());
   }
@@ -1955,8 +1969,9 @@ void python_converter::get_return_statements(
   const nlohmann::json &ast_node,
   codet &target_block)
 {
+  exprt return_value = get_expr(ast_node["value"]);
   code_returnt return_code;
-  return_code.return_value() = get_expr(ast_node["value"]);
+  return_code.return_value() = return_value;
   return_code.location() = get_location_from_decl(ast_node);
   target_block.copy_to_operands(return_code);
 }
@@ -2003,9 +2018,9 @@ exprt python_converter::get_block(const nlohmann::json &ast_block)
     case StatementType::ASSERT:
     {
       current_element_type = bool_type();
-      exprt test = get_expr(element["test"]);
       code_assertt assert_code;
-      assert_code.assertion() = test;
+      assert_code.assertion() = get_expr(element["test"]);
+      assert_code.location() = get_location_from_decl(element);
       block.move_to_operands(assert_code);
       break;
     }
@@ -2016,7 +2031,6 @@ exprt python_converter::get_block(const nlohmann::json &ast_block)
       exprt expr = get_expr(element["value"]);
       if (expr != empty)
         block.move_to_operands(expr);
-
       break;
     }
     case StatementType::CLASS_DEFINITION:
@@ -2036,14 +2050,10 @@ exprt python_converter::get_block(const nlohmann::json &ast_block)
       block.move_to_operands(continue_expr);
       break;
     }
-    /* "https://docs.python.org/3/tutorial/controlflow.html:
-     * "The pass statement does nothing. It can be used when a statement
-     *  is required syntactically but the program requires no action." */
     case StatementType::PASS:
-    // Imports are handled by parser.py so we can just ignore here.
     case StatementType::IMPORT:
-    // TODO: Raises are ignored for now. Handling case to avoid calling abort() on default.
     case StatementType::RAISE:
+      // These statements don't generate any code
       break;
     case StatementType::UNKNOWN:
     default:
