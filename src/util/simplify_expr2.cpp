@@ -3071,7 +3071,24 @@ expr2tc byte_extract2t::do_simplify() const
     }
   }
 
-  if (src != source_value || off != source_offset)
+  bool src_unequal = src != source_value;
+  // NaN != NaN is always true, but this defeats the purpose of the check
+  // (the assumption is that `src != source_value` means that we were able to simplify
+  // something)
+  if (is_constant_floatbv2t(src) && is_constant_floatbv2t(source_value))
+  {
+    ieee_floatt src_val = to_constant_floatbv2t(src).value;
+    ieee_floatt source_val = to_constant_floatbv2t(source_value).value;
+    if (
+      src_val.is_NaN() && source_val.is_NaN() &&
+      src_val.get_exponent() == source_val.get_exponent() &&
+      src_val.get_fraction() == source_val.get_fraction())
+    {
+      src_unequal = false;
+    }
+  }
+
+  if (src_unequal || off != source_offset)
     return byte_extract2tc(type, src, off, big_endian);
 
   return {};

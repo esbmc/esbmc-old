@@ -1,0 +1,4 @@
+CORE
+main.cpp
+--overflow-check
+^VERIFICATION SUCCESSFUL$
